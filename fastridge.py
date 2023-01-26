@@ -96,7 +96,28 @@ class RidgeLOOCV:
         self.fit_intercept=fit_intercept
         self.normalize=normalize
 
+    @staticmethod
+    def alpha_range_GMLNET(x, y):
+        n, p = x.shape
+        x_mu = x.mean(axis=0)
+        x_star = ((x - x_mu)/(1/n**0.5*np.sum((x - x_mu)**2, axis=0)))
+        alpha_max = 1/((0.001)*n) * np.max(np.abs(x_star.T*y).T.sum(axis=0))
+        alpha_min = 0.0001*alpha_max if n >= p else 0.01*alpha_max
+        return alpha_min, alpha_max
+
+    @staticmethod
+    def alpha_log_grid(alpha_min, alpha_max, l=100, base=10.0):
+        log_min = np.log(alpha_min) / np.log(base)
+        log_max = np.log(alpha_max) / np.log(base)
+        return np.logspace(log_min, log_max, l, endpoint=True)
+
     def fit(self, x, y):
+        if np.isscalar(self.alphas):
+            alpha_min, alpha_max = self.alpha_range_GMLNET(x, y)
+            self.alphas_ = self.alpha_log_grid(alpha_min, alpha_max, self.alphas)
+        else:
+            self.alphas_ = self.alphas
+
         n, p = x.shape
 
         a_x, a_y = (x.mean(axis=0), y.mean()) if self.fit_intercept else (np.zeros(p), 0.0)
@@ -109,20 +130,20 @@ class RidgeLOOCV:
         c = u.T.dot(y) * s
         r = u*s
 
-        loo_mse = np.zeros_like(self.alphas)
-        for i in range(len(self.alphas)):
+        loo_mse = np.zeros_like(self.alphas_)
+        for i in range(len(self.alphas_)):
             # hat = u.dot(np.diag(s**2/(s**2 + self.alphas[i]))).dot(u.T)
             # err = y - hat.dot(y)
             # loo_mse[i] = np.mean((err / (1 - np.diagonal(hat)))**2)
-            z = u*(s**2/(s**2 + self.alphas[i]))
+            z = u*(s**2/(s**2 + self.alphas_[i]))
             h = (z*u).sum(axis=1)
             # print('h', h.shape)
-            beta = c/(s**2 + self.alphas[i])
+            beta = c/(s**2 + self.alphas_[i])
             err = y - r.dot(beta)
             loo_mse[i] = np.mean((err / (1 - h))**2)
 
         i_star = np.argmin(loo_mse)
-        self.alpha_ = self.alphas[i_star]
+        self.alpha_ = self.alphas_[i_star]
 
         beta = c / (s**2 + self.alpha_)
         beta = v_trans.T.dot(beta)
