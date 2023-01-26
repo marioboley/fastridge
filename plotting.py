@@ -14,18 +14,20 @@ def plot_metric(metric, exp, p=0, est_idx=None, plot_intervals=True, ax=None):
     ax.set_xlabel('$n$')
     ax.set_ylabel(metric.symbol())
     ax.margins(x=0.005)
-    ax.legend()
+    # ax.legend()
     return ax
 
-def plot_metrics(metrics, exp, **params):
+def plot_metrics(exp, metrics, prob_idx, figsize=None, **params):
+    prob_idx = list(range(len(exp.problems))) if prob_idx is None else prob_idx
     r = len(metrics)
-    s = len(exp.problems)
-    fig, axs = plt.subplots(r, s, figsize=(0.5+s*3.5, r*3.5), tight_layout=True, sharex=True, sharey='row', squeeze=False)
+    s = len(prob_idx)
+    figsize = (0.5+s*3.5, r*3.5) if figsize is None else figsize
+    fig, axs = plt.subplots(r, s, figsize=figsize, tight_layout=True, sharex=True, sharey='row', squeeze=False)
     for i in range(r):
         for j in range(s):
-            plot_metric(metrics[i], exp, j, ax=axs[i][j], **params)
+            plot_metric(metrics[i], exp, prob_idx[j], ax=axs[i][j], **params)
             if j > 0:
                 axs[i][j].set_ylabel(None)
-        if i < r-1:
-            axs[i][j].set_xlabel(None)
+            if i < r-1:
+                axs[i][j].set_xlabel(None)
     return fig, axs
