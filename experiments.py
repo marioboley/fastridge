@@ -4,18 +4,6 @@ from sklearn.base import clone
 from fastprogress.fastprogress import progress_bar 
 from scipy.stats import norm
 
-class LinearProblem:
-
-    def __init__(self, beta, sigma, x_dist):
-        self.beta = beta
-        self.sigma = sigma
-        self.x_dist = x_dist
-
-    def rvs(self, number=100):
-        x = self.x_dist.rvs(size=number)
-        y = x.dot(self.beta) + norm.rvs(0, self.sigma, size=number)
-        return x, y
-
 class ParameterMeanSquaredError:
 
     @staticmethod
@@ -64,6 +52,8 @@ class NumberOfIterations:
     def __call__(est, prob, x, y):
         if hasattr(est, 'iterations_'):
             return est.iterations_
+        elif hasattr(est, 'alphas_'):
+            return len(est.alphas_)
         elif hasattr(est, 'alphas'):
             return len(est.alphas)
         else:
