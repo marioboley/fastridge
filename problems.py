@@ -55,9 +55,10 @@ def random_multiple_means_problem(p=100, r=None, sigma_beta=1.0, sigma_eps=0.5):
     beta = random_sparse_vector(p, r, sigma_beta)
     return linear_problem(beta, sigma_eps, x_dist)    
 
-def random_problem(p, r):
+def random_problem(p, r=None, sigma_beta=1.0, sigma_eps=0.5):
+    r = p if r is None else r
     x_cov = wishart.rvs(p, np.eye(p))
     x_mu = multivariate_normal.rvs(np.zeros(p))
     x_dist = multivariate_normal(x_mu, x_cov)
-    beta = random_problem(p, r)    
-    return linear_problem(beta, 0.5, x_dist)
+    beta = random_sparse_vector(p, r, sigma_beta)
+    return linear_problem(beta, sigma_eps, x_dist)

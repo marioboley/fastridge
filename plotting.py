@@ -17,7 +17,7 @@ def plot_metric(metric, exp, p=0, est_idx=None, plot_intervals=True, ax=None):
     # ax.legend()
     return ax
 
-def plot_metrics(exp, metrics, prob_idx, figsize=None, **params):
+def plot_metrics(exp, metrics, prob_idx=None, figsize=None, **params):
     prob_idx = list(range(len(exp.problems))) if prob_idx is None else prob_idx
     r = len(metrics)
     s = len(prob_idx)

@@ -99,9 +99,9 @@ class RidgeLOOCV:
     @staticmethod
     def alpha_range_GMLNET(x, y):
         n, p = x.shape
-        x_mu = x.mean(axis=0)
-        x_star = ((x - x_mu)/(1/n**0.5*np.sum((x - x_mu)**2, axis=0)))
-        alpha_max = 1/((0.001)*n) * np.max(np.abs(x_star.T*y).T.sum(axis=0))
+        # x_mu = x.mean(axis=0)
+        # x_star = ((x - x_mu)/(1/n**0.5*np.sum((x - x_mu)**2, axis=0)))
+        alpha_max = 1/((0.001)*n) * np.max(np.abs(x.T.dot(y)))
         alpha_min = 0.0001*alpha_max if n >= p else 0.01*alpha_max
         return alpha_min, alpha_max
 
@@ -112,12 +112,6 @@ class RidgeLOOCV:
         return np.logspace(log_min, log_max, l, endpoint=True)
 
     def fit(self, x, y):
-        if np.isscalar(self.alphas):
-            alpha_min, alpha_max = self.alpha_range_GMLNET(x, y)
-            self.alphas_ = self.alpha_log_grid(alpha_min, alpha_max, self.alphas)
-        else:
-            self.alphas_ = self.alphas
-
         n, p = x.shape
 
         a_x, a_y = (x.mean(axis=0), y.mean()) if self.fit_intercept else (np.zeros(p), 0.0)
@@ -125,6 +119,12 @@ class RidgeLOOCV:
 
         x = (x - a_x)/b_x
         y = (y - a_y)/b_y
+
+        if np.isscalar(self.alphas):
+            alpha_min, alpha_max = self.alpha_range_GMLNET(x, y)
+            self.alphas_ = self.alpha_log_grid(alpha_min, alpha_max, self.alphas)
+        else:
+            self.alphas_ = self.alphas
 
         u, s, v_trans = svd(x, full_matrices=False)
         c = u.T.dot(y) * s
