@@ -130,7 +130,7 @@ class RidgeLOOCV:
         c = u.T.dot(y) * s
         r = u*s
 
-        loo_mse = np.zeros_like(self.alphas_)
+        self.loo_mse_ = np.zeros_like(self.alphas_)
         for i in range(len(self.alphas_)):
             # hat = u.dot(np.diag(s**2/(s**2 + self.alphas[i]))).dot(u.T)
             # err = y - hat.dot(y)
@@ -140,14 +140,14 @@ class RidgeLOOCV:
             # print('h', h.shape)
             beta = c/(s**2 + self.alphas_[i])
             err = y - r.dot(beta)
-            loo_mse[i] = np.mean((err / (1 - h))**2)
+            self.loo_mse_[i] = np.mean((err / (1 - h))**2)
 
-        i_star = np.argmin(loo_mse)
+        i_star = np.argmin(self.loo_mse_)
         self.alpha_ = self.alphas_[i_star]
 
         beta = c / (s**2 + self.alpha_)
         beta = v_trans.T.dot(beta)
-        self.sigma_square_ = loo_mse[i_star] * b_y**2
+        self.sigma_square_ = self.loo_mse_[i_star] * b_y**2
         self.coef_ = beta * b_y / b_x
         self.intercept_ = a_y - self.coef_.dot(a_x)
 
