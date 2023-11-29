@@ -1,5 +1,10 @@
 # <p align="center"> Bayes beats Cross Validation: Fast and Accurate Ridge Regression via Expectation Maximization </p>
- 
+
+<p align="center">
+    <a href="https://neurips.cc/virtual/2023/poster/72106"><img src="https://img.shields.io/badge/NeurIPS%202023-916ba4"></a>
+    <a href="https://arxiv.org/abs/2310.18860"><img src="https://img.shields.io/badge/arXiv-2310.18860-b31b1b"></a>
+</p>
+
 <p align="center"> by Shu Yu Tew, Mario Boley, Daniel F. Schmidt </p>
 
 ## Usage
