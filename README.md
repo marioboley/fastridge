@@ -1,4 +1,4 @@
-# <p align="center"> Bayes beats Cross Validation: Fast and Accurate <br/> Ridge Regression via Expectation Maximization </p>
+# <p align="center"> fastridge: Fast and Accurate Ridge Regression via Expectation Maximization </p>
 
 <p align="center">
     <a href="https://neurips.cc/virtual/2023/poster/72106"><img src="https://img.shields.io/badge/NeurIPS%202023-916ba4"></a>
