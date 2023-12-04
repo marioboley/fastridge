@@ -1,16 +1,22 @@
 import numpy as np
+import time
 from scipy.linalg import svd
 from scipy.optimize import minimize
+from sklearn.linear_model import Ridge
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error
+import pandas as pd 
 
 class RidgeEM:
 
-    def __init__(self, epsilon=0.00000001, fit_intercept=True, normalize=True, closed_form_m_step=True, trace=False, verbose=False):
+    def __init__(self, epsilon=0.00000001, fit_intercept=True, normalize=True, closed_form_m_step=True, trace=False, verbose=False, t2 = True):
         self.epsilon = epsilon
         self.fit_intercept = fit_intercept
         self.normalize = normalize
         self.trace = trace
         self.verbose = verbose
         self.closed_form_m_step = closed_form_m_step
+        self.t2 = t2  #parameterization - if t2, tau2 follows beta prime & we maximizing in terms of tau2, else tau follows half Cauchy & we maximize for tau
 
     def __repr__(self):
         return f'RidgeEM(eps={self.epsilon})'
@@ -31,13 +37,17 @@ class RidgeEM:
 
         x = (x - a_x)/b_x
         y = (y - a_y)/b_y
-
+        
+        svd_start_time = time.time()
         u, s, v_trans = svd(x, full_matrices=False)
+        self.svdTime = time.time() - svd_start_time
+        
         y_sqnorm = y.dot(y)
         c = u.T.dot(y) * s
         beta = c/s**2
         tau_square = 1
         sigma_square = y.var()
+        RSS = 1e10
         self.iterations_ = 0
 
         if self.trace:
@@ -46,15 +56,29 @@ class RidgeEM:
             self.tau_squares_ = [tau_square]
 
         while True:
+            RSS_old = RSS
             beta_old = beta
             beta = c / (s*s + 1/tau_square)
 
             w = beta.dot(beta) + sigma_square*((1/(s*s+1/tau_square)).sum()+tau_square*max(p-n, 0))
-            z = y_sqnorm - 2*beta.dot(c)+(beta*beta).dot(s*s) + sigma_square*(s*s/(s*s + 1/tau_square)).sum()
+            
+            RSS = y_sqnorm - 2*beta.dot(c)+(beta*beta).dot(s*s)
+            z = RSS + sigma_square*(s*s/(s*s + 1/tau_square)).sum()
 
             if self.closed_form_m_step:
-                tau_square = (w*(-1+n) - z*(1+p) + (4*w*(n+1)*z*(3+p)+(w+z*(p+1)-w*n)**2)**0.5) / (2*z*(3+p))
-                sigma_square = (z*tau_square + w) / ((n+p+2)*tau_square)
+                
+                if self.t2:
+                    
+                    #tau_square = ((((w**2)*(n**2)) + ((z**2)*(p**2)) + 2*w*z*(8 + 4*n + 4*p + n*p))**0.5 + w*n -z*p)/(2*z*(2+p)) ##half cauchy
+                    tau_square = (w*(-1+n) - z*(1+p) + (4*w*(n+1)*z*(3+p)+(w+z*(p+1)-w*n)**2)**0.5) / (2*z*(3+p))  ##beta prime         
+                    sigma_square = (z*tau_square + w) / ((n+p+2)*tau_square)
+                    
+                else:
+                    
+                    tau_square = (w*(-1+n) - z*p + (4*w*(n+1)*z*(2+p)+(w+z*p-w*n)**2)**0.5) / (2*z*(2+p))      
+                    sigma_square = (z*tau_square + w) / ((n+p+1)*tau_square)
+                    
+                    
             else:
                 theta_init = np.array([tau_square, sigma_square])
                 opt_res = minimize(self.neg_q_function, x0=theta_init, args=(w, z, n, p), method='BFGS')
