@@ -61,7 +61,8 @@ class RidgeEM:
                 theta = opt_res.x
                 tau_square, sigma_square = theta[0], theta[1]
             
-            delta = abs(beta_old - beta).sum() / (1 + abs(beta).sum())
+            #delta = abs(beta_old - beta).sum() / (1 + abs(beta).sum())
+            delta = abs(RSS_old - RSS).sum() / (1 + abs(RSS).sum())
 
             if self.verbose or self.trace:
                 coef = v_trans.T.dot(beta)
@@ -76,6 +77,7 @@ class RidgeEM:
             if  delta < self.epsilon:
                 break
 
+        beta = c / (s*s + 1/tau_square)
         beta = v_trans.T.dot(beta)
         
         self.coef_ = beta * b_y / b_x
