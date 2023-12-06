@@ -2,7 +2,7 @@ from distutils.core import setup
 
 setup(
     name = 'fastridge',
-    packages = ['fastridge'],
+    py_modules = ['fastridge'],
     version = 'v1.0.0',  # Ideally should be same as your github release tag varsion
     description = 'Fast and robust approach to ridge regression with simultaneous estimation of model parameters and hyperparameter tuning within a Bayesian framework via expectation-maximization (EM). ',
     author = 'Mario Boley',
