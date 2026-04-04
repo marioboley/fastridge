@@ -3,6 +3,7 @@
 <p align="center">
     <a href="https://neurips.cc/virtual/2023/poster/72106"><img src="https://img.shields.io/badge/NeurIPS%202023-916ba4"></a>
     <a href="https://arxiv.org/abs/2310.18860"><img src="https://img.shields.io/badge/arXiv-2310.18860-b31b1b"></a>
+    <a href="https://github.com/marioboley/fastridge/actions/workflows/ci.yml"><img src="https://github.com/marioboley/fastridge/actions/workflows/ci.yml/badge.svg" alt="Tests"></a>
 </p>
 
 <p align="center"> by Shu Yu Tew, Mario Boley, Daniel F. Schmidt </p>
