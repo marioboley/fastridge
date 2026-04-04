@@ -3,3 +3,4 @@ scipy>=1.8.1
 scikit-learn>=1.0.2
 matplotlib>=3.5.2
 fastprogress>=1.0.3
+pytest>=7.0
