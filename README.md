@@ -42,9 +42,11 @@ print(ridgeCV.coef_)
 Should you find this repository helpful, please consider citing the associated paper:
 ```
 @article{tew2023bayes,
-  title={Bayes beats Cross Validation: Efficient and Accurate Ridge Regression via Expectation Maximization},
-  author={Tew, Shu Yu and Boley, Mario and Schmidt, Daniel F},
-  journal={arXiv preprint arXiv:2310.18860},
+  title={Bayes beats cross validation: Efficient and accurate ridge regression via expectation maximization},
+  author={Tew, Shu Yu and Boley, Mario and Schmidt, Daniel},
+  journal={Advances in Neural Information Processing Systems},
+  volume={36},
+  pages={19749--19768},
   year={2023}
 }
 ```
