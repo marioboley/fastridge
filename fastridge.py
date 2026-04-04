@@ -2,10 +2,6 @@ import numpy as np
 import time
 from scipy.linalg import svd
 from scipy.optimize import minimize
-from sklearn.linear_model import Ridge
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_squared_error
-import pandas as pd 
 
 class RidgeEM:
 
