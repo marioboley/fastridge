@@ -1,3 +1,22 @@
+"""
+Fast and accurate ridge regression via Expectation Maximization.
+
+Examples
+--------
+>>> import numpy as np
+>>> from fastridge import RidgeEM, RidgeLOOCV
+>>> rng = np.random.default_rng(0)
+>>> n, p = 500, 5
+>>> beta = np.array([1.0, -2.0, 0.5, 3.0, -1.5])
+>>> X = rng.standard_normal((n, p))
+>>> y = X @ beta + 0.05 * rng.standard_normal(n)
+>>> em = RidgeEM().fit(X, y)
+>>> np.allclose(em.coef_, beta, atol=0.1)
+True
+>>> loocv = RidgeLOOCV().fit(X, y)
+>>> np.allclose(loocv.coef_, beta, atol=0.1)
+True
+"""
 import numpy as np
 import time
 from scipy.linalg import svd
