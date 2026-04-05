@@ -12,15 +12,14 @@ The entire library lives in a single module: [fastridge.py](fastridge.py).
 
 ## Setup
 
-```bash
-pip install -e .
-```
+See the **Project Setup** section in `README.md` for environment setup instructions (adapt depending on system using venv or conda).
 
 ## Development Workflow
 
 - Day-to-day work goes on the `dev` branch; `main` is kept green
-- Run tests locally: `pytest --doctest-modules fastridge.py`
-- CI runs on push to both `dev` and `main` via `.github/workflows/ci.yml`
+- CI runs on push to both `dev` and `main` via `.github/workflows/ci.yml` — two jobs: `package-test` (package deps only, doctest) and `project-test` (full requirements, all tests)
+- Run all tests via `pytest` before commit
+- All local Python processs use dedicated virtual environment 
 
 ## Architecture
 
