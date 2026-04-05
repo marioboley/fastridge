@@ -16,7 +16,7 @@ jobs:
           python-version: '3.13'
       - run: pip install .
       - run: pip install pytest
-      - run: pytest --doctest-modules fastridge.py
+      - run: pytest -c pytest-package.ini
 
   project-test:
     runs-on: ubuntu-latest
