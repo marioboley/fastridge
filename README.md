@@ -10,31 +10,28 @@
 
 ## Usage
 ```python
-import pandas as pd
 import numpy as np
-from sklearn.datasets import load_diabetes
-from sklearn.model_selection import train_test_split
 from fastridge import RidgeEM, RidgeLOOCV
 
-# load data
-diabetes = load_diabetes()
-x, y = load_diabetes(return_X_y=True)
-x_train, x_test, y_train, y_test = train_test_split(x, y, train_size=20, shuffle=True, random_state=180)
+# generate synthetic regression data
+rng = np.random.default_rng(0)
+beta = np.array([1.0, -2.0, 0.5, 3.0, -1.5])
+x_train = rng.standard_normal((50, 5))
+y_train = x_train @ beta + 0.1 * rng.standard_normal(50)
+x_test = rng.standard_normal((1000, 5))
+y_test = x_test @ beta + 0.1 * rng.standard_normal(1000)
 
-# fitting ridge regression using the proposed EM algorithm
-ridgeEM = RidgeEM(trace = True)
-ridgeEM.fit(x_train, y_train)
+# fit using EM algorithm (no cross-validation required)
+em = RidgeEM()
+em.fit(x_train, y_train)
+print(f'RidgeEM    train RMSE: {np.sqrt(np.mean((y_train - em.predict(x_train))**2)):.4f}')
+print(f'RidgeEM    test RMSE:  {np.sqrt(np.mean((y_test - em.predict(x_test))**2)):.4f}')
 
-# fitting ridge regression using the fast implementation of LOOCV
-N = 400
-alphas =np.logspace(-15, 10, N, endpoint=True, base=10)
-ridgeCV = RidgeLOOCV(alphas=alphas, fit_intercept=True, normalize=True)
-ridgeCV.fit(x_train, y_train)
-
-# return the coefficients of the respective regression models (refer to the code documentation for more details on additional return values)
-print(ridgeEM.coef_)
-print(ridgeCV.coef_)
-
+# fit using fast LOOCV
+loocv = RidgeLOOCV()
+loocv.fit(x_train, y_train)
+print(f'RidgeLOOCV train RMSE: {np.sqrt(np.mean((y_train - loocv.predict(x_train))**2)):.4f}')
+print(f'RidgeLOOCV test RMSE:  {np.sqrt(np.mean((y_test - loocv.predict(x_test))**2)):.4f}')
 ```
 
 
