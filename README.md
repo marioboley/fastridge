@@ -35,6 +35,48 @@ print(f'RidgeLOOCV test RMSE:  {np.sqrt(np.mean((y_test - loocv.predict(x_test))
 ```
 
 
+## Package Installation
+
+To install the package from pypi use
+
+```bash
+pip install fastridge
+```
+
+or to install directly from this repository use
+
+```bash
+pip install git+https://github.com/marioboley/fastridge.git
+```
+
+(`pip` or `pip3` depending on the local Python setup.)
+
+## Project Setup
+
+To alter the package or to run and modify the analysis code, run
+
+```bash
+pip3 install -r requirements.txt
+pip3 install -e .
+```
+
+at the root of the repository after cloning.
+
+The second step (local editable installation) is required so that `import fastridge` works for the analysis notebooks in subdirectories.
+
+It is recommended to install package and dependencies into a dedicated virtual environment by running at the project root before the above steps:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate   # or: conda create/activate for Anaconda
+```
+
+To test the project setup, run the test suite:
+
+```bash
+pytest
+```
+
 ## Citation
 Should you find this repository helpful, please consider citing the associated paper:
 ```
