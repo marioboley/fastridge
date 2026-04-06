@@ -6,3 +6,5 @@ fastprogress>=1.0.3
 pandas>=1.3
 pytest>=7.0
 pytest-codeblocks>=0.14
+nbmake>=1.0
+ipykernel>=6.0
