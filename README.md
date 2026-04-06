@@ -14,7 +14,7 @@
 The statistical performance of the ridge regression estimate for linear regression parameters fitted to a training dataset $\mathbf{X}\in\mathbb{R}^{n \times p}$, $\boldsymbol{y} \in \mathbb{R}^n$, i.e., 
 
 $$
-\hat{\boldsymbol{\beta}}_\alpha = \arg\min_{\boldsymbol{\beta} \in \mathbb{R}^p} \{\|\boldsymbol{y} - \boldsymbol{X}\boldsymbol{\beta}\|^2 + \alpha\Vert\boldsymbol{\beta}\Vert^2\}
+\hat{\boldsymbol{\beta}}_\alpha = \arg\min_{\boldsymbol{\beta} \in \mathbb{R}^p} \lbrace\Vert\boldsymbol{y} - \boldsymbol{X}\boldsymbol{\beta}\Vert^2 + \alpha\Vert\boldsymbol{\beta}\Vert^2\rbrace
 $$
 
 strongly depends on the choice of the regularisation parameter $\alpha \in \mathbb{R}_+$. The commonly used approach to estimate the optimal value for this parameter is by leave-one-out cross-validation.
@@ -30,9 +30,11 @@ This package provides an alternative iterative algorithm based on the Bayesian f
 ```
 
 In particular, the package implements an expectation maximisation (EM) approach that approximates the marginal posterior mode $\arg\max_{\sigma^2, \tau^2} p(\sigma^2, \tau^2 \mid \boldsymbol{X}, \boldsymbol{y})$ by iterating the equation
+
 $$
 \sigma^2_{t+1}, \tau^2_{t+1} = \arg\min_{\sigma^2, \tau^2} \mathbb{E}_{\boldsymbol{\beta} \mid \sigma^2_t, \tau^2_t}\!\left[-\log p(\boldsymbol{\beta}, \sigma^2, \tau^2)\right]
 $$
+
 until a convergence criterion is met.
 
 ## Usage
