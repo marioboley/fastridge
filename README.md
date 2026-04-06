@@ -11,11 +11,11 @@
 
 ---
 
-The statistical performance of the ridge regression estimate for linear regression parameters fitted to a training dataset $\newcommand{\bX}{\boldsymbol{X}}\bX\in\R^{n \times p}$, $\newcommand{\by}{\boldsymbol{y}}\by \in \R^n$, i.e., 
+The statistical performance of the ridge regression estimate for linear regression parameters fitted to a training dataset $\boldsymbol{X}\in\mathbb{R}^{n \times p}$, $\boldsymbol{y} \in \mathbb{R}^n$, i.e., 
 $$
 \newcommand{\bI}{\boldsymbol{I}}
-% \newcommand{\bX}{\boldsymbol{X}}
-% \newcommand{\by}{\boldsymbol{y}}
+\newcommand{\bX}{\boldsymbol{X}}
+\newcommand{\by}{\boldsymbol{y}}
 \newcommand{\bbeta}{\boldsymbol{\beta}}
 \operatorname{argmin}
 \hat\bbeta_\alpha = \argmin_{\bbeta \in \mathbb{R}^p} \{\|\by - \bX\bbeta\|^2 + \alpha\|\bbeta\|^2\}
