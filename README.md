@@ -12,6 +12,7 @@
 ---
 
 The statistical performance of the ridge regression estimate for linear regression parameters fitted to a training dataset $\boldsymbol{X}\in\mathbb{R}^{n \times p}$, $\boldsymbol{y} \in \mathbb{R}^n$, i.e., 
+
 $$
 \newcommand{\bI}{\boldsymbol{I}}
 \newcommand{\bX}{\boldsymbol{X}}
@@ -20,6 +21,7 @@ $$
 \operatorname{argmin}
 \hat\bbeta_\alpha = \argmin_{\bbeta \in \mathbb{R}^p} \{\|\by - \bX\bbeta\|^2 + \alpha\|\bbeta\|^2\}
 $$
+
 strongly depends on the choice of the regularisation parameter $\alpha \in \R_+$. The commonly used approach to estimate the optimal value for this parameter is by leave-one-out cross-validation.
 
 This package provides an alternative iterative algorithm based on the Bayesian formulation of ridge regression:
