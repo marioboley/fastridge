@@ -14,30 +14,24 @@
 The statistical performance of the ridge regression estimate for linear regression parameters fitted to a training dataset $\boldsymbol{X}\in\mathbb{R}^{n \times p}$, $\boldsymbol{y} \in \mathbb{R}^n$, i.e., 
 
 $$
-\newcommand{\bI}{\boldsymbol{I}}
-\gdef\bX{\boldsymbol{X}}
-\newcommand{\by}{\boldsymbol{y}}
-\newcommand{\bbeta}{\boldsymbol{\beta}}
-\hat\bbeta_\alpha = \mathrm{argmin}_{\bbeta \in \mathbb{R}^p} \{\|\by - \bX\bbeta\|^2 + \alpha\|\bbeta\|^2\}
+\hat{\boldsymbol{\beta}}_\alpha = \arg\min_{\boldsymbol{\beta} \in \mathbb{R}^p} \{\|\boldsymbol{y} - \boldsymbol{X}\boldsymbol{\beta}\|^2 + \alpha\|\boldsymbol{\beta}\|^2\}
 $$
 
-strongly depends on the choice of the regularisation parameter $\alpha \in \R_+$. The commonly used approach to estimate the optimal value for this parameter is by leave-one-out cross-validation.
+strongly depends on the choice of the regularisation parameter $\alpha \in \mathbb{R}_+$. The commonly used approach to estimate the optimal value for this parameter is by leave-one-out cross-validation.
 
 This package provides an alternative iterative algorithm based on the Bayesian formulation of ridge regression:
 $$
-\newcommand{\given}{\, \mid \,}
-\newcommand{\normal}{\mathrm{N}}
 \begin{aligned}
-\by \given \bX, \bbeta, \sigma^2, \tau^2 &\sim \normal(\bX\bbeta, \sigma^2 \bI_n)\\
-\bbeta &\sim \normal(0, \tau^{-2}\sigma^{-2}\bI_p)\\
-\sigma^2 &\sim \sigma^{-2}\mathrm{d}\sigma^2\\
-\tau^2 &\sim \pi(\tau^2)\mathrm{d}\tau^2
+\boldsymbol{y} \mid \boldsymbol{X}, \boldsymbol{\beta}, \sigma^2, \tau^2 &\sim \mathrm{N}(\boldsymbol{X}\boldsymbol{\beta}, \sigma^2 \boldsymbol{I}_n)\\
+\boldsymbol{\beta} &\sim \mathrm{N}(0, \tau^{-2}\sigma^{-2}\boldsymbol{I}_p)\\
+\sigma^2 &\sim \sigma^{-2}\,\mathrm{d}\sigma^2\\
+\tau^2 &\sim \pi(\tau^2)\,\mathrm{d}\tau^2
 \end{aligned}
 $$
 
-In particular, the package implements an expectation maximisation (EM) approach that approximates the marginal posterior maximum $\argmax p(\sigma^2, \tau^2 \given \bX, \by)$ mode by iterating the equation
+In particular, the package implements an expectation maximisation (EM) approach that approximates the marginal posterior mode $\arg\max_{\sigma^2, \tau^2} p(\sigma^2, \tau^2 \mid \boldsymbol{X}, \boldsymbol{y})$ by iterating the equation
 $$
-\sigma^2_{t+1}, \tau^2_{t+1} = \argmin_{\sigma^2, \tau^2} \mathbb{E}_{\bbeta \given \sigma_t, \tau_{t}}[-\log p(\bbeta, \sigma^2, \tau^2)]
+\sigma^2_{t+1}, \tau^2_{t+1} = \arg\min_{\sigma^2, \tau^2} \mathbb{E}_{\boldsymbol{\beta} \mid \sigma^2_t, \tau^2_t}\!\left[-\log p(\boldsymbol{\beta}, \sigma^2, \tau^2)\right]
 $$
 until a convergence criterion is met.
 
