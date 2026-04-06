@@ -14,7 +14,7 @@
 The statistical performance of the ridge regression estimate for linear regression parameters fitted to a training dataset $\mathbf{X}\in\mathbb{R}^{n \times p}$, $\boldsymbol{y} \in \mathbb{R}^n$, i.e., 
 
 $$
-\hat{\boldsymbol{\beta}}_\alpha = \arg\min_{\boldsymbol{\beta} \in \mathbb{R}^p} \{\|\boldsymbol{y} - \boldsymbol{X}\boldsymbol{\beta}\|^2 + \alpha\|\boldsymbol{\beta}\|^2\}
+\hat{\boldsymbol{\beta}}_\alpha = \arg\min_{\boldsymbol{\beta} \in \mathbb{R}^p} \{\|\boldsymbol{y} - \boldsymbol{X}\boldsymbol{\beta}\|^2 + \alpha\Vert\boldsymbol{\beta}\Vert^2\}
 $$
 
 strongly depends on the choice of the regularisation parameter $\alpha \in \mathbb{R}_+$. The commonly used approach to estimate the optimal value for this parameter is by leave-one-out cross-validation.
