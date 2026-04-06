@@ -32,7 +32,7 @@ This package provides an alternative iterative algorithm based on the Bayesian f
 In particular, the package implements an expectation maximisation (EM) approach that approximates the marginal posterior mode $\arg\max_{\sigma^2, \tau^2} p(\sigma^2, \tau^2 \mid \boldsymbol{X}, \boldsymbol{y})$ by iterating the equation
 
 $$
-\sigma^2_{t+1}, \tau^2_{t+1} = \arg\min_{\sigma^2, \tau^2} \mathbb{E}_{\boldsymbol{\beta} \mid \sigma^2_t, \tau^2_t} \left[-\log\, p(\boldsymbol{\beta}, \sigma^2, \tau^2)\right]
+\sigma^2_{t+1}, \tau^2_{t+1} = \arg\min_{\sigma^2, \tau^2} \mathbb{E}_{\boldsymbol{\beta} \mid \sigma^2_t, \tau^2_t} \left[-\log\thinspace p(\boldsymbol{\beta}, \sigma^2, \tau^2)\right]
 $$
 
 until a convergence criterion is met.
