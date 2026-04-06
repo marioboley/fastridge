@@ -20,14 +20,14 @@ $$
 strongly depends on the choice of the regularisation parameter $\alpha \in \mathbb{R}_+$. The commonly used approach to estimate the optimal value for this parameter is by leave-one-out cross-validation.
 
 This package provides an alternative iterative algorithm based on the Bayesian formulation of ridge regression:
-$$
+```math
 \begin{aligned}
 \boldsymbol{y} \mid \boldsymbol{X}, \boldsymbol{\beta}, \sigma^2, \tau^2 &\sim \mathrm{N}(\boldsymbol{X}\boldsymbol{\beta}, \sigma^2 \boldsymbol{I}_n)\\
 \boldsymbol{\beta} &\sim \mathrm{N}(0, \tau^{-2}\sigma^{-2}\boldsymbol{I}_p)\\
 \sigma^2 &\sim \sigma^{-2}\,\mathrm{d}\sigma^2\\
 \tau^2 &\sim \pi(\tau^2)\,\mathrm{d}\tau^2
 \end{aligned}
-$$
+```
 
 In particular, the package implements an expectation maximisation (EM) approach that approximates the marginal posterior mode $\arg\max_{\sigma^2, \tau^2} p(\sigma^2, \tau^2 \mid \boldsymbol{X}, \boldsymbol{y})$ by iterating the equation
 $$
