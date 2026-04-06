@@ -1,4 +1,5 @@
-# <p align="center"> fastridge: Fast and Accurate Ridge Regression via Expectation Maximization </p>
+# <p align="center"> fastridge </p>
+<h2 align="center"> Fast and Accurate Ridge Regression via Expectation Maximization </h2>
 
 <p align="center">
     <a href="https://neurips.cc/virtual/2023/poster/72106"><img src="https://img.shields.io/badge/NeurIPS%202023-916ba4"></a>
@@ -7,6 +8,37 @@
 </p>
 
 <p align="center"> by Shu Yu Tew, Mario Boley, Daniel F. Schmidt </p>
+
+---
+
+The statistical performance of the ridge regression estimate for linear regression parameters fitted to a training dataset $\newcommand{\bX}{\boldsymbol{X}}\bX\in\R^{n \times p}$, $\newcommand{\by}{\boldsymbol{y}}\by \in \R^n$, i.e., 
+$$
+\newcommand{\bI}{\boldsymbol{I}}
+% \newcommand{\bX}{\boldsymbol{X}}
+% \newcommand{\by}{\boldsymbol{y}}
+\newcommand{\bbeta}{\boldsymbol{\beta}}
+\operatorname{argmin}
+\hat\bbeta_\alpha = \argmin_{\bbeta \in \mathbb{R}^p} \{\|\by - \bX\bbeta\|^2 + \alpha\|\bbeta\|^2\}
+$$
+strongly depends on the choice of the regularisation parameter $\alpha \in \R_+$. The commonly used approach to estimate the optimal value for this parameter is by leave-one-out cross-validation.
+
+This package provides an alternative iterative algorithm based on the Bayesian formulation of ridge regression:
+$$
+\newcommand{\given}{\, \mid \,}
+\newcommand{\normal}{\mathrm{N}}
+\begin{aligned}
+\by \given \bX, \bbeta, \sigma^2, \tau^2 &\sim \normal(\bX\bbeta, \sigma^2 \bI_n)\\
+\bbeta &\sim \normal(0, \tau^{-2}\sigma^{-2}\bI_p)\\
+\sigma^2 &\sim \sigma^{-2}\mathrm{d}\sigma^2\\
+\tau^2 &\sim \pi(\tau^2)\mathrm{d}\tau^2
+\end{aligned}
+$$
+
+In particular, the package implements an expectation maximisation (EM) approach that approximates the marginal posterior maximum $\argmax p(\sigma^2, \tau^2 \given \bX, \by)$ mode by iterating the equation
+$$
+\sigma^2_{t+1}, \tau^2_{t+1} = \argmin_{\sigma^2, \tau^2} \mathbb{E}_{\bbeta \given \sigma_t, \tau_{t}}[-\log p(\bbeta, \sigma^2, \tau^2)]
+$$
+until a convergence criterion is met.
 
 ## Usage
 ```python
