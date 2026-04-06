@@ -38,3 +38,7 @@ Both classes follow the scikit-learn estimator API (`fit(X, y)` / `predict(X)`) 
 ## Analysis
 
 Jupyter notebooks and experiment scripts in `Analysis/` use the library for empirical evaluation. These are research/exploration code, not part of the package.
+
+Selected notebooks are run as part of `pytest` via `nbmake` (see `pytest.ini`). Cells tagged `skip-execution` are skipped during testing — used for heavy experiment cells that are too slow for routine runs.
+
+**Editing notebooks:** Always use the `Read` tool (not Bash) before `NotebookEdit`, and specify `cell_id` from the Read output. The notebook must not be open in VSCode at the same time — the extension modifies the file on save, causing write conflicts. The `NotebookEdit` tool does not show a diff preview; announce the intended change in plain text before applying it.
