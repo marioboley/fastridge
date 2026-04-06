@@ -11,7 +11,7 @@
 
 ---
 
-The statistical performance of the ridge regression estimate for linear regression parameters fitted to a training dataset $\boldsymbol{X}\in\mathbb{R}^{n \times p}$, $\boldsymbol{y} \in \mathbb{R}^n$, i.e., 
+The statistical performance of the ridge regression estimate for linear regression parameters fitted to a training dataset $\mathbf{X}\in\mathbb{R}^{n \times p}$, $\boldsymbol{y} \in \mathbb{R}^n$, i.e., 
 
 $$
 \hat{\boldsymbol{\beta}}_\alpha = \arg\min_{\boldsymbol{\beta} \in \mathbb{R}^p} \{\|\boldsymbol{y} - \boldsymbol{X}\boldsymbol{\beta}\|^2 + \alpha\|\boldsymbol{\beta}\|^2\}
