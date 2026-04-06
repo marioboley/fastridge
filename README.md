@@ -18,8 +18,7 @@ $$
 \newcommand{\bX}{\boldsymbol{X}}
 \newcommand{\by}{\boldsymbol{y}}
 \newcommand{\bbeta}{\boldsymbol{\beta}}
-\operatorname{argmin}
-\hat\bbeta_\alpha = \argmin_{\bbeta \in \mathbb{R}^p} \{\|\by - \bX\bbeta\|^2 + \alpha\|\bbeta\|^2\}
+\hat\bbeta_\alpha = \mathrm{argmin}_{\bbeta \in \mathbb{R}^p} \{\|\by - \bX\bbeta\|^2 + \alpha\|\bbeta\|^2\}
 $$
 
 strongly depends on the choice of the regularisation parameter $\alpha \in \R_+$. The commonly used approach to estimate the optimal value for this parameter is by leave-one-out cross-validation.
