@@ -42,25 +42,32 @@ until a convergence criterion is met.
 import numpy as np
 from fastridge import RidgeEM, RidgeLOOCV
 
-# generate synthetic regression data
+# synthetic regression data
 rng = np.random.default_rng(0)
-beta = np.array([1.0, -2.0, 0.5, 3.0, -1.5])
-x_train = rng.standard_normal((50, 5))
-y_train = x_train @ beta + 0.1 * rng.standard_normal(50)
-x_test = rng.standard_normal((1000, 5))
+beta = np.array([1.0, -2.0, 0.5, 3.0, -1.5, 0.0])
+x_train = rng.standard_normal((20, 6))
+y_train = x_train @ beta + 0.1 * rng.standard_normal(20)
+x_test = rng.standard_normal((1000, 6))
 y_test = x_test @ beta + 0.1 * rng.standard_normal(1000)
 
-# fit using EM algorithm (no cross-validation required)
-em = RidgeEM()
-em.fit(x_train, y_train)
-print(f'RidgeEM    train RMSE: {np.sqrt(np.mean((y_train - em.predict(x_train))**2)):.4f}')
-print(f'RidgeEM    test RMSE:  {np.sqrt(np.mean((y_test - em.predict(x_test))**2)):.4f}')
+# fit using EM approach 
+em = RidgeEM().fit(x_train, y_train)
+y_train_em = em.predict(x_train)
+y_test_em = em.predict(x_test)
+print(f'EM   train MSE: {np.mean((y_train - y_train_em)**2):.4f}')
+print(f'EM   test MSE:  {np.mean((y_test - y_test_em)**2):.4f}')
+print(f'EM   coef_:         {em.coef_}')
+print(f'EM   alpha_:        {em.alpha_:.4f}')
+print(f'EM   sigma_square:  {em.sigma_square_:.4f}')
 
 # fit using fast LOOCV
-loocv = RidgeLOOCV()
-loocv.fit(x_train, y_train)
-print(f'RidgeLOOCV train RMSE: {np.sqrt(np.mean((y_train - loocv.predict(x_train))**2)):.4f}')
-print(f'RidgeLOOCV test RMSE:  {np.sqrt(np.mean((y_test - loocv.predict(x_test))**2)):.4f}')
+cv = RidgeLOOCV().fit(x_train, y_train)
+y_train_cv = cv.predict(x_train)
+y_test_cv = cv.predict(x_test)
+print(f'CV   train MSE: {np.mean((y_train - y_train_cv)**2):.4f}')
+print(f'CV   test MSE:  {np.mean((y_test - y_test_cv)**2):.4f}')
+print(f'CV   coef_:    {cv.coef_}')
+print(f'CV   alpha_:   {cv.alpha_:.4f}')
 ```
 
 
