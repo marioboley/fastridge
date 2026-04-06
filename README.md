@@ -15,7 +15,7 @@ The statistical performance of the ridge regression estimate for linear regressi
 
 $$
 \newcommand{\bI}{\boldsymbol{I}}
-\newcommand{\bX}{\boldsymbol{X}}
+\gdef\bX{\boldsymbol{X}}
 \newcommand{\by}{\boldsymbol{y}}
 \newcommand{\bbeta}{\boldsymbol{\beta}}
 \hat\bbeta_\alpha = \mathrm{argmin}_{\bbeta \in \mathbb{R}^p} \{\|\by - \bX\bbeta\|^2 + \alpha\|\bbeta\|^2\}
