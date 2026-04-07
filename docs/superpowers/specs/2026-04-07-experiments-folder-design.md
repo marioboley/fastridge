@@ -65,8 +65,6 @@ Copy of `increasing_p.ipynb` renamed, with the following changes:
 
 **Cell 4 (`exp1` visualization, `skip-execution`):** Uncomment `plt.savefig('../output/paper2023_figure2.pdf', ...)`.
 
-**Cells 5–6 (test_loocv):** Remove — these were scratch cells not relevant to the notebook's purpose.
-
 ## pytest.ini
 
 Update `--nbmake` path to new notebook:
