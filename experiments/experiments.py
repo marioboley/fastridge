@@ -1,6 +1,8 @@
 import time
 import numpy as np
 from sklearn.base import clone
+from sklearn.linear_model import Ridge, LinearRegression
+from sklearn.metrics import mean_squared_error
 from fastprogress.fastprogress import progress_bar
 
 
@@ -152,4 +154,46 @@ class Experiment:
                         for stat in self.stats:
                             self.__dict__[str(stat) + '_'][r, i, n_idx, j] = stat(
                                 _est, self.problems[i], x_test, y_test)
+        return self
+
+
+class RidgePathExperiment:
+
+    def __init__(self, x_train, y_train, x_test, y_test, alphas,
+                 fit_intercept=True, normalize=True):
+        self.x_train = x_train
+        self.y_train = y_train
+        self.x_test = x_test
+        self.y_test = y_test
+        self.alphas = alphas
+        self.fit_intercept = fit_intercept
+        self.normalize = normalize
+
+    def run(self):
+        n, p = self.x_train.shape
+
+        a_x = self.x_train.mean(axis=0) if self.fit_intercept else np.zeros(p)
+        a_y = self.y_train.mean() if self.fit_intercept else 0.0
+        b_x = self.x_train.std(axis=0) if self.normalize else np.ones(p)
+        b_y = self.y_train.std() if self.normalize else 1.0
+
+        x_tr = (self.x_train - a_x) / b_x
+        y_tr = (self.y_train - a_y) / b_y
+        x_te = (self.x_test - a_x) / b_x
+        y_te = (self.y_test - a_y) / b_y
+
+        self.alphas_ = np.asarray(self.alphas)
+        self.coef_path_ = np.zeros((p, len(self.alphas_)))
+        self.true_risk_ = np.zeros(len(self.alphas_))
+
+        for i, alpha in enumerate(self.alphas_):
+            rr = Ridge(alpha=alpha, fit_intercept=False)
+            rr.fit(x_tr, y_tr)
+            self.coef_path_[:, i] = rr.coef_
+            self.true_risk_[i] = mean_squared_error(y_te, rr.predict(x_te))
+
+        lr = LinearRegression(fit_intercept=False)
+        lr.fit(x_tr, y_tr)
+        self.ols_coef_ = lr.coef_
+
         return self
