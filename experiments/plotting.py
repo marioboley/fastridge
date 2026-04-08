@@ -78,7 +78,7 @@ def plot_lambda_risks(ridgeCV, ridgeCV_test=None, ridgeEM=None, ax=None, axis_la
         ax1.set_xlabel('$\\lambda$', size=18)
 
 
-def plot_pathway_risk(ridge, title=None, best_lambda=True, variable_names=None, figsize=(8, 9.5), dpi=300):
+def plot_pathway_risk(ridge, title=None, best_lambda=True, variable_names=None, figsize=(8, 9.5), dpi=300, save_file=None):
     plt.rcParams['text.usetex'] = True
 
     fig, (ax1, ax2) = plt.subplots(2, sharex=True, figsize=figsize, dpi=dpi)
@@ -106,5 +106,8 @@ def plot_pathway_risk(ridge, title=None, best_lambda=True, variable_names=None, 
 
     ax1.legend(ncol=2, fontsize="13")
     plt.subplots_adjust(hspace=0.05)
+
+    if save_file is not None:
+        plt.savefig(save_file, dpi=600, bbox_inches="tight", pad_inches=0)
 
     plt.show()
