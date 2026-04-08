@@ -36,7 +36,7 @@ def plot_metrics(exp, metrics, prob_idx=None, figsize=None, **params):
     return fig, axs
 
 
-def plot_lambda_risks(ridgeCV, ridgeCV_test=None, ridgeEM=None, ax=None, axis_labels=True, title=None, dpi=300):
+def plot_lambda_risks(ridgeCV, ridgeCV_test=None, ridgeEM=None, ax=None, axis_labels=True, title=None, localmin=True, dpi=300):
     ax1 = plt.gca() if ax is None else ax
     ax1.figure.set_size_inches(8.4, 4.8)
     ax1.figure.set_dpi(dpi)
