@@ -94,7 +94,7 @@ Full registry entries (one per raw dataset — shared-source tasks reference the
 | `crime` | Communities and Crime | `from_ucimlrepo(183)` |
 | `concrete` | Concrete Compressive Strength | `from_ucimlrepo(165)` |
 | `naval_propulsion` | Naval Propulsion Plants | `from_ucimlrepo(316)` |
-| `diabetes` | Diabetes | `from_sklearn(load_diabetes)` |
+| `diabetes` | Diabetes | `from_sklearn(load_diabetes)`, `from_ucimlrepo(529)` |
 | `eye` | Scheetz gene expression | `from_url(EYE_URL)` |
 | `facebook` | Facebook Metrics | `from_ucimlrepo(368)` |
 | `forest` | Forest Fires | `from_ucimlrepo(162)` |
@@ -125,24 +125,20 @@ Located at project root. Tracked in git. Contents gitignored by default via `dat
 
 ## Doctests
 
-Placed in function or module docstrings in `experiments/data.py`. Added to pytest via existing `--doctest-modules` coverage (no pytest.ini change needed since `data.py` is in `experiments/`).
+Placed in the module docstring of `experiments/data.py`. Added to pytest via existing `--doctest-modules` coverage (no pytest.ini change needed).
 
-**`from_sklearn` doctest** (no network, always fast):
+The primary module doctest exercises `get_dataset` for both supported local cases — committed CSV and sklearn:
+
 ```python
->>> from sklearn.datasets import load_diabetes
->>> src = from_sklearn(load_diabetes)
->>> src().shape
+>>> df = get_dataset('yacht')   # cache hit — committed datasets/yacht.csv
+>>> df.shape
+(308, 7)
+>>> df = get_dataset('diabetes')  # from_sklearn, no network
+>>> df.shape
 (442, 11)
 ```
 
-**Cache hit doctest** (uses committed `datasets/yacht.csv`):
-```python
->>> df = get_dataset('yacht')
->>> df.shape
-(308, 7)
-```
-
-No doctest for `from_ucimlrepo` or `from_url` at the unit level — tested indirectly via notebook.
+No doctests at the individual source factory level.
 
 ---
 
