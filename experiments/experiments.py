@@ -205,7 +205,8 @@ class RidgePathExperiment:
 
 
 def RealDataExperiment(dataframes, targets, names, estimators={}, n_iterations=100,
-                       test_prop=0.3, seed=None, polynomial=None, classification=False):
+                       test_prop=0.3, seed=None, polynomial=None, classification=False,
+                       verbose=True):
     """Run repeated train/test experiments on a list of DataFrames.
 
     Parameters
@@ -222,6 +223,7 @@ def RealDataExperiment(dataframes, targets, names, estimators={}, n_iterations=1
     seed : int or None
     polynomial : int or None
     classification : bool
+    verbose : bool
     """
     results = {}
     for j, df in enumerate(dataframes):
@@ -230,7 +232,8 @@ def RealDataExperiment(dataframes, targets, names, estimators={}, n_iterations=1
         X = df.drop([target], axis=1)
         y = df[target]
 
-        print(name)
+        if verbose:
+            print(name)
 
         categorical_cols = [col for col in X.columns if X[col].dtype in ['object', 'category']]
         encoder = OneHotEncoder(drop='first', sparse_output=False)
@@ -253,7 +256,8 @@ def RealDataExperiment(dataframes, targets, names, estimators={}, n_iterations=1
                 X = pd.concat([X, X_poly], axis=1)
             else:
                 X = X_poly
-            print(X.shape)
+            if verbose:
+                print(X.shape)
 
         estimator_results = {
             est_name: {'mse': [], 'r2': [], 'time': [], 'p': [], 'lambda': [], 'iter': [], 'CA': [], 'q': []}
@@ -264,7 +268,8 @@ def RealDataExperiment(dataframes, targets, names, estimators={}, n_iterations=1
             np.random.seed(seed)
 
         for i in range(n_iterations):
-            print(i, end='')
+            if verbose:
+                print(i, end='')
             X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_prop)
             std = X_train.std()
             non_zero_std_cols = std[std != 0].index
