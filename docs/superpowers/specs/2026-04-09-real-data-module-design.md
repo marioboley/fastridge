@@ -1,6 +1,6 @@
 ---
 name: Real Data Module
-description: Design for experiments/data.py — registry-based dataset access with local caching and programmatic retrieval
+description: Design for experiments/data.py — two-tier dataset registry with local caching, programmatic retrieval, and a reduced real_data.ipynb
 type: project
 ---
 
@@ -8,159 +8,163 @@ type: project
 
 ## Background
 
-The legacy notebook `Analysis/Real_Data/Real data.ipynb` runs a comparative experiment across 19 regression datasets loaded from local CSV files not in the repository. This module abstracts dataset access so that experiments can be reproduced without manual data preparation.
+The legacy notebook `Analysis/Real_Data/Real data.ipynb` runs a comparative experiment across 19 regression datasets loaded from local CSV files not in the repository. This project establishes `experiments/data.py` to abstract dataset access, moves `RealDataExperiments` into `experiments/experiments.py`, and creates a reproducible `experiments/real_data.ipynb` with a small runnable preview experiment.
 
 ## Goal
 
-Implement `experiments/data.py` with a registry of all 19 single-target regression datasets from the legacy notebook. Each entry records expected dimensions and an ordered list of programmatic sources. A `get_dataset(name)` function checks a local cache first, then tries sources in sequence, persists the result, and warns if retrieved dimensions don't match expectations.
+Implement `experiments/data.py` with a `DATASETS` registry and a `get_dataset(name)` function. Provide `experiments/real_data.ipynb` with a reduced preview experiment (tested via nbmake) and full-experiment cells tagged `skip-execution`. Move `RealDataFunction.py` logic into `experiments.py`.
 
-## Architecture
+## Known Open Issue
 
-Single module `experiments/data.py`. Local cache at `datasets/` (project root, gitignored). No notebook in this project — the module is exercised only via doctests.
+`RidgeEM(squareU=False)` appears in the legacy notebook. This parameter is not present in the current `RidgeEM` API — it may be a renamed or removed parameter. Resolution is deferred until the notebook is assembled and run.
 
 ---
 
-## API
+## Architecture
 
-```python
-get_dataset(name: str) -> tuple[pd.DataFrame, pd.Series]
-```
+### Tier 1 — Data retrieval (`get_dataset`)
 
-Returns `(X, y)` where:
-- `X` is a `pd.DataFrame` of feature columns (categorical columns retained as-is, downstream encoding is the caller's responsibility)
-- `y` is a `pd.Series` of the target column
-- Rows with any missing values in X or y are dropped
+`get_dataset(name) -> pd.DataFrame`
 
-**Algorithm:**
-1. Check `datasets/<name>.csv` — if present, load and return (X, y)
-2. Try each source callable in `REGISTRY[name]['sources']` in order; stop on first success
-3. Persist the result to `datasets/<name>.csv`
-4. Check `X.shape[0] == n` and `X.shape[1] == p`; emit `warnings.warn` for each mismatch
-5. Return (X, y)
+Returns the full raw DataFrame for the named dataset. Pipeline:
+1. Check `datasets/<name>.csv` — if present, load via `pd.read_csv` and return
+2. Try each source callable in `DATASETS[name]['sources']` in order; stop on first success
+3. Persist result to `datasets/<name>.csv` via `pd.DataFrame.to_csv(index=False)`
+4. Return DataFrame
 
 Raises `KeyError` for unknown names. Raises `RuntimeError` if all sources fail.
+
+### Tier 2 — Task assembly (caller's responsibility)
+
+Target extraction, column dropping, one-hot encoding, and train/test splitting remain the caller's responsibility — currently handled by `RealDataExperiment` (moved from `RealDataFunction.py`). This project does not refactor tier 2.
 
 ---
 
 ## Source Factories
 
-Each factory returns a zero-argument callable that returns `(X: pd.DataFrame, y: pd.Series)` or raises on failure.
+Each factory returns a zero-argument callable that returns a `pd.DataFrame` or raises on failure.
 
 ```python
-def from_sklearn(loader_fn, target: str) -> callable
+def from_sklearn(loader_fn) -> callable
 ```
-Calls `loader_fn(as_frame=True)`, extracts target column `target` from `frame.frame`.
+Calls `loader_fn(as_frame=True)` and returns `bunch.frame` — the full DataFrame including the target column.
+
+Doctest:
+```python
+>>> from sklearn.datasets import load_diabetes
+>>> src = from_sklearn(load_diabetes)
+>>> df = src()
+>>> df.shape
+(442, 11)
+```
 
 ```python
-def from_ucimlrepo(id: int, target: str, drop: list[str] = None) -> callable
+def from_ucimlrepo(id: int) -> callable
 ```
-Calls `ucimlrepo.fetch_ucirepo(id=id)`, combines `features` and `targets` DataFrames, extracts `target` column. Drops `drop` columns from X if provided.
+Calls `ucimlrepo.fetch_ucirepo(id=id)` and returns the combined features+targets DataFrame.
 
 ```python
-def from_url(url: str, target: str, sep: str = ',', header: int = 0,
-             names: list[str] = None, drop: list[str] = None) -> callable
+def from_url(url: str, **read_csv_kwargs) -> callable
 ```
-Downloads via `pd.read_csv(url, sep=sep, header=header, names=names)`, extracts `target`, drops `drop` columns from X.
+Returns `pd.read_csv(url, **read_csv_kwargs)`.
 
 ---
 
-## Dataset Registry
+## DATASETS Registry
 
-`REGISTRY` is a module-level dict. Each entry:
+Two-level structure:
+
 ```python
-{
-    'n': int,        # expected rows after NaN drop
-    'p': int,        # expected feature columns (raw, before one-hot encoding)
-    'sources': list  # ordered list of source callables
+DATASETS = {
+    'abalone':    {'sources': [from_ucimlrepo(1)]},
+    'diabetes':   {'sources': [from_sklearn(load_diabetes)]},
+    ...
 }
 ```
 
-The `n` and `p` values reflect what `get_dataset` returns (post-NaN-drop, pre-encoding). Values marked **[verify]** are estimates from the paper appendix and notebook output that need confirmation during implementation.
+Full registry entries (one per raw dataset — shared-source tasks reference the same entry):
 
-| Key | Full name | n | p | Source |
-|---|---|---|---|---|
-| `abalone` | Abalone | 4177 | 8 | `from_ucimlrepo(1, target='Rings')` |
-| `autompg` | Auto MPG | 392 | 7 | `from_ucimlrepo(9, target='mpg')` |
-| `automobile` | Automobile | 159 [verify] | 25 [verify] | `from_ucimlrepo(10, target='price')` |
-| `airfoil` | Airfoil Self-Noise | 1503 | 5 | `from_ucimlrepo(291, target='Scaled sound pressure level')` |
-| `bh` | Boston Housing | 506 | 13 | `from_url(BH_URL, target='MEDV', sep=' ', names=BH_COLS)` — see note |
-| `crime` | Communities and Crime | 1994 [verify] | 127 [verify] | `from_ucimlrepo(183, target='ViolentCrimesPerPop')` |
-| `concrete` | Concrete Compressive Strength | 1030 | 8 | `from_ucimlrepo(165, target='Concrete compressive strength(MPa)')` |
-| `conditionCom` | Naval Propulsion — compressor | 11934 | 14 [verify] | `from_ucimlrepo(316, target='gt_c_decay', drop=['gt_t_decay'])` [verify drop] |
-| `conditionTur` | Naval Propulsion — turbine | 11934 | 14 [verify] | `from_ucimlrepo(316, target='gt_t_decay', drop=['gt_c_decay'])` [verify drop] |
-| `diabetes` | Diabetes | 442 | 10 | `from_sklearn(load_diabetes, target='target')` |
-| `eye` | Scheetz gene expression | 120 | 200 | `from_url(EYE_URL, target='y')` — see note |
-| `facebook` | Facebook Metrics | 500 | 18 [verify] | `from_ucimlrepo(368, target='Total Interactions')` |
-| `forest` | Forest Fires | 517 | 12 | `from_ucimlrepo(162, target='area')` |
-| `parkinson_motor` | Parkinson's Telemonitoring | 5875 | 19 [verify] | `from_ucimlrepo(189, target='motor_UPDRS', drop=['subject#', 'total_UPDRS'])` |
-| `parkinson_total` | Parkinson's Telemonitoring | 5875 | 19 [verify] | `from_ucimlrepo(189, target='total_UPDRS', drop=['subject#', 'motor_UPDRS'])` |
-| `realEstate` | Real Estate Valuation | 414 | 6 | `from_ucimlrepo(477, target='Y house price of unit area')` |
-| `student` | Student Performance | 395 [verify] | 30 [verify] | `from_ucimlrepo(320, target='G3', drop=['G1', 'G2'])` |
-| `yacht` | Yacht Hydrodynamics | 308 | 6 | `from_ucimlrepo(243, target='Residuary resistance per unit weight of displacement')` |
-| `ribo` | Riboflavin | 71 | 4088 | `from_url(RIBO_URL, target='y')` — see note |
+| Key | Full name | Sources |
+|---|---|---|
+| `abalone` | Abalone | `from_ucimlrepo(1)` |
+| `autompg` | Auto MPG | `from_ucimlrepo(9)` |
+| `automobile` | Automobile | `from_ucimlrepo(10)` |
+| `airfoil` | Airfoil Self-Noise | `from_ucimlrepo(291)` |
+| `bh` | Boston Housing | `from_url(BH_URL, ...)` |
+| `crime` | Communities and Crime | `from_ucimlrepo(183)` |
+| `concrete` | Concrete Compressive Strength | `from_ucimlrepo(165)` |
+| `naval_propulsion` | Naval Propulsion Plants | `from_ucimlrepo(316)` |
+| `diabetes` | Diabetes | `from_sklearn(load_diabetes)` |
+| `eye` | Scheetz gene expression | `from_url(EYE_URL)` |
+| `facebook` | Facebook Metrics | `from_ucimlrepo(368)` |
+| `forest` | Forest Fires | `from_ucimlrepo(162)` |
+| `parkinsons` | Parkinson's Telemonitoring | `from_ucimlrepo(189)` |
+| `real_estate` | Real Estate Valuation | `from_ucimlrepo(477)` |
+| `student` | Student Performance | `from_ucimlrepo(320)` |
+| `yacht` | Yacht Hydrodynamics | `from_ucimlrepo(243)` |
+| `ribo` | Riboflavin | `from_url(RIBO_URL)` |
+| `crop` | CROP (UCR) | `from_url(CROP_URL)` |
+| `elec_devices` | Electric Devices (UCR) | `from_url(ELEC_URL)` |
+| `starlight` | Star Light Curves (UCR) | `from_url(STAR_URL)` |
 
-### Notes on uncertain sources
+Notes: `bh`, `eye`, `ribo` and the three UCR URLs need to be identified during implementation. `naval_propulsion` backs both `conditionCom` and `conditionTur` tasks in the notebook; `parkinsons` backs both motor and total UPDRS tasks. The exact column names, target names, and drop lists for tier-2 assembly are determined during notebook construction.
 
-**Boston Housing (`bh`):** No longer in sklearn. UCI archive URL (`https://archive.ics.uci.edu/ml/machine-learning-databases/housing/housing.data`) is whitespace-separated with no header; column names must be hardcoded as `BH_COLS`. Alternative: `ucimlrepo` may have it (verify during implementation). The `n=159` for automobile and NaN-drop counts for crime/bh need empirical confirmation.
+---
 
-**Eye (`eye`):** Scheetz et al. (2006) gene expression data, distributed with the R package `hdi`. A direct CSV URL needs to be identified during implementation (e.g. from a CRAN mirror or published supplementary). Dimensions n=120, p=200 are from the paper appendix.
+## `datasets/` Folder
 
-**Riboflavin (`ribo`):** Bühlmann et al. riboflavin production dataset, also from R package `hdi`. Direct CSV URL needs identification during implementation. Dimensions n=71, p=4088 are from the paper appendix.
-
-**Student Performance:** UCI dataset 320 contains two files (math and Portuguese). The original experiment used one; which needs verification. `G1` and `G2` (earlier grade reports) are dropped per paper appendix note.
-
-**conditionCom / conditionTur:** Both come from UCI dataset 316. The `from_ucimlrepo` callable is identical except for the target column — the source loads the full dataset and extracts the respective target.
+Located at project root. Tracked in git. Contents gitignored by default via `datasets/.gitignore`:
+```
+*
+!.gitignore
+!yacht.csv
+```
+`yacht.csv` (308 rows, 7 columns) is committed as the example fixture — small, clean, no missing values, easily retrievable from `from_ucimlrepo(243)` for comparison.
 
 ---
 
 ## Doctests
 
-One doctest per source kind, included in module docstring or function docstrings. All doctests must pass in the standard pytest run — retrieval will use the local cache after first run.
+Placed in function or module docstrings in `experiments/data.py`. Added to pytest via existing `--doctest-modules` coverage (no pytest.ini change needed since `data.py` is in `experiments/`).
 
+**`from_sklearn` doctest** (no network, always fast):
 ```python
-# from_sklearn (fast, no network on cache hit)
->>> X, y = get_dataset('diabetes')
->>> X.shape
-(442, 10)
->>> y.name
-'target'
-
-# from_ucimlrepo (network on first run, cached thereafter)
->>> X, y = get_dataset('yacht')
->>> X.shape
-(308, 6)
-
-# from_url (network on first run, cached thereafter)
->>> X, y = get_dataset('ribo')  # or 'eye' if ribo URL unresolvable
->>> X.shape[1]
-4088
+>>> from sklearn.datasets import load_diabetes
+>>> src = from_sklearn(load_diabetes)
+>>> src().shape
+(442, 11)
 ```
 
-Doctests that require network access will be slow on first run. The cache makes subsequent runs fast. No `# doctest: +SKIP` — these must actually execute.
+**Cache hit doctest** (uses committed `datasets/yacht.csv`):
+```python
+>>> df = get_dataset('yacht')
+>>> df.shape
+(308, 7)
+```
+
+No doctest for `from_ucimlrepo` or `from_url` at the unit level — tested indirectly via notebook.
 
 ---
 
-## Cache Format
+## `experiments/experiments.py` Changes
 
-`datasets/<name>.csv` — comma-separated, with header row. Written by `pd.DataFrame.to_csv(index=False)` on all columns (X columns + target column combined). Read back by `pd.read_csv`, then target column extracted.
+`RealDataFunction.py` logic moved in as `RealDataExperiment`. The interface changes minimally: instead of accepting filenames, it accepts a list of `(name, df)` pairs where `df` is the raw DataFrame from `get_dataset`. Target column, drop list, and encoding remain internal. Exact refactoring is deferred to implementation — the key constraint is that the notebook's existing call pattern is preserved as closely as possible.
 
 ---
 
-## pytest Integration
+## `experiments/real_data.ipynb`
 
-Add to `pytest.ini` addopts:
-```
---doctest-modules experiments/data.py
-```
+Structure:
+- **Cell 1 (imports):** `get_dataset`, `RealDataExperiment`, estimators
+- **Cell 2 (preview experiment):** runs on `['yacht', 'diabetes']` only — two datasets with tested loaders, no network required after cache populated. Produces summary table.
+- **Cell 3+ (full experiment, `skip-execution`):** full dataset list matching legacy notebook, all polynomial degrees
 
-`ucimlrepo` must be added to `requirements.txt` (project dependencies).
+Added to `pytest.ini` nbmake list.
 
 ---
 
 ## Out of Scope
 
-- Running any experiment or producing any figure
-- Polynomial feature expansion
-- One-hot encoding or other preprocessing beyond NaN-row dropping
-- The three UCR time-series classification datasets (CROP, ELEC D, STAR L)
-- The four large commented-out regression datasets (BLOG, TWITTER, TOM'S HW, CT SLICES)
+- Refactoring tier-2 task assembly (target selection, encoding, train/test split) — stays inside `RealDataExperiment`
+- Figure 3 scatter plot — deferred to a future project
+- Resolving `RidgeEM(squareU=False)` — deferred until notebook run reveals the issue
