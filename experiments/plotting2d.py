@@ -1,7 +1,10 @@
+import shutil
 import numpy as np
 from matplotlib import pyplot as plt
 from scipy.linalg import inv, det
 import matplotlib
+
+matplotlib.rcParams['text.usetex'] = shutil.which('latex') is not None
 
 
 def plot_marg_profile(x_train, y_train, t2, ax=None, text="", dpi=300):
@@ -15,7 +18,7 @@ def plot_marg_profile(x_train, y_train, t2, ax=None, text="", dpi=300):
 
     matplotlib.rc('xtick', labelsize=18)
     matplotlib.rc('ytick', labelsize=18)
-    plt.rcParams['text.usetex'] = True
+
 
     ax.axvline(t2[np.argmax(p)], ls=':', color='forestgreen', linewidth=2.5)
     ax.margins(x=0.01)
@@ -93,7 +96,7 @@ def plot_EM_step(z, sig2, t2, sigma2, tau2, levels, sigma_squares=None, tau_squa
 
     matplotlib.rc('xtick', labelsize=16)
     matplotlib.rc('ytick', labelsize=16)
-    plt.rcParams['text.usetex'] = True
+
 
     ax.text(sig2.min() * 1.01, t2.min() * 1.01, title, color="white", fontweight='bold',
             horizontalalignment="left", verticalalignment="bottom", size=18)

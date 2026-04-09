@@ -179,8 +179,10 @@ class RidgePathExperiment:
 
         x_tr = (self.x_train - a_x) / b_x
         y_tr = (self.y_train - a_y) / b_y
-        x_te = (self.x_test - a_x) / b_x
-        y_te = (self.y_test - a_y) / b_y
+        a_x_te, a_y_te = (self.x_test.mean(axis=0), self.y_test.mean()) if self.fit_intercept else (np.zeros(p), 0.0)
+        b_x_te, b_y_te = (self.x_test.std(axis=0), self.y_test.std()) if self.normalize else (np.ones(p), 1.0)
+        x_te = (self.x_test - a_x_te) / b_x_te
+        y_te = (self.y_test - a_y_te) / b_y_te
 
         self.alphas_ = np.asarray(self.alphas)
         self.coef_path_ = np.zeros((p, len(self.alphas_)))

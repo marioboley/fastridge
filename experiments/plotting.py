@@ -1,7 +1,10 @@
+import shutil
 import numpy as np
 from matplotlib import pyplot as plt
 from scipy.signal import argrelmin
 import matplotlib
+
+matplotlib.rcParams['text.usetex'] = shutil.which('latex') is not None
 
 def plot_metric(metric, exp, p=0, est_idx=None, plot_intervals=True, ax=None):
     if ax is None:
@@ -43,7 +46,7 @@ def plot_lambda_risks(ridgeCV, ridgeCV_test=None, ridgeEM=None, ax=None, axis_la
 
     matplotlib.rc('xtick', labelsize=16)
     matplotlib.rc('ytick', labelsize=16)
-    plt.rcParams['text.usetex'] = True
+
 
     ax1.plot(ridgeCV.alphas_, ridgeCV.loo_mse_, label='LOOCV')
 
@@ -79,7 +82,8 @@ def plot_lambda_risks(ridgeCV, ridgeCV_test=None, ridgeEM=None, ax=None, axis_la
 
 
 def plot_pathway_risk(ridge, title=None, best_lambda=True, variable_names=None, figsize=(8, 9.5), dpi=300, save_file=None):
-    plt.rcParams['text.usetex'] = True
+    matplotlib.rc('xtick', labelsize=16)
+    matplotlib.rc('ytick', labelsize=16)
 
     fig, (ax1, ax2) = plt.subplots(2, sharex=True, figsize=figsize, dpi=dpi)
 
@@ -88,9 +92,6 @@ def plot_pathway_risk(ridge, title=None, best_lambda=True, variable_names=None, 
                 color="black", marker='x', s=20, zorder=10)
     ax1.set_xscale("log")
     ax1.set_ylabel('$\\hat{\\beta}_{\\lambda}$', size=18)
-
-    matplotlib.rc('xtick', labelsize=16)
-    matplotlib.rc('ytick', labelsize=16)
 
     ax2.plot(ridge.alphas_, ridge.true_risk_)
     ax2.set_xscale("log")
