@@ -1,8 +1,11 @@
 import time
 import numpy as np
+import pandas as pd
 from sklearn.base import clone
 from sklearn.linear_model import Ridge, LinearRegression
-from sklearn.metrics import mean_squared_error
+from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import OneHotEncoder, PolynomialFeatures
 from fastprogress.fastprogress import progress_bar
 
 
@@ -199,3 +202,108 @@ class RidgePathExperiment:
         self.ols_coef_ = lr.coef_
 
         return self
+
+
+def RealDataExperiment(dataframes, targets, names, estimators={}, n_iterations=100,
+                       test_prop=0.3, seed=None, polynomial=None, classification=False):
+    """Run repeated train/test experiments on a list of DataFrames.
+
+    Parameters
+    ----------
+    dataframes : list of pd.DataFrame
+        Raw datasets (full DataFrames from get_dataset).
+    targets : list of str
+        Target column name for each dataset.
+    names : list of str
+        Display name for each dataset (used as result dict key).
+    estimators : dict mapping str to estimator
+    n_iterations : int
+    test_prop : float
+    seed : int or None
+    polynomial : int or None
+    classification : bool
+    """
+    results = {}
+    for j, df in enumerate(dataframes):
+        name = names[j]
+        target = targets[j]
+        X = df.drop([target], axis=1)
+        y = df[target]
+
+        print(name)
+
+        categorical_cols = [col for col in X.columns if X[col].dtype in ['object', 'category']]
+        encoder = OneHotEncoder(drop='first', sparse_output=False)
+        if categorical_cols:
+            encoded_X = encoder.fit_transform(X[categorical_cols])
+            X = pd.concat([
+                X.drop(categorical_cols, axis=1),
+                pd.DataFrame(encoded_X, columns=encoder.get_feature_names_out(categorical_cols))
+            ], axis=1)
+
+        if polynomial is not None:
+            poly = PolynomialFeatures(degree=polynomial, include_bias=False)
+            X_poly = poly.fit_transform(X)
+            X_poly = pd.DataFrame(X_poly, columns=poly.get_feature_names_out(X.columns))
+            npoly, ppoly = X_poly.shape
+            if npoly * ppoly > 35000000:
+                X_poly = X_poly.drop(X.columns, axis=1)
+                pnew = int(np.ceil(35000000 / npoly))
+                X_poly = X_poly.iloc[:, np.random.choice(X_poly.shape[1], size=pnew, replace=False)]
+                X = pd.concat([X, X_poly], axis=1)
+            else:
+                X = X_poly
+            print(X.shape)
+
+        estimator_results = {
+            est_name: {'mse': [], 'r2': [], 'time': [], 'p': [], 'lambda': [], 'iter': [], 'CA': [], 'q': []}
+            for est_name in estimators
+        }
+
+        if seed is not None:
+            np.random.seed(seed)
+
+        for i in range(n_iterations):
+            print(i, end='')
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_prop)
+            std = X_train.std()
+            non_zero_std_cols = std[std != 0].index
+            X_train = X_train[non_zero_std_cols]
+            X_test = X_test[non_zero_std_cols]
+
+            for est_name, estimator in estimators.items():
+                t0 = time.time()
+                estimator.fit(X_train, y_train)
+                elapsed = time.time() - t0
+
+                if classification:
+                    estimator_results[est_name]['CA'].append(estimator.score(X_test, y_test))
+                    estimator_results[est_name]['p'].append(X_train.shape[1])
+                    estimator_results[est_name]['q'].append(len(estimator.classes_))
+                else:
+                    y_pred = estimator.predict(X_test)
+                    estimator_results[est_name]['mse'].append(mean_squared_error(y_test, y_pred))
+                    estimator_results[est_name]['r2'].append(r2_score(y_test, y_pred))
+                    estimator_results[est_name]['p'].append(len(estimator.coef_))
+                    estimator_results[est_name]['lambda'].append(estimator.alpha_)
+
+                estimator_results[est_name]['time'].append(elapsed)
+                if est_name == 'EM':
+                    estimator_results[est_name]['iter'].append(estimator.iterations_)
+
+        data_results = {}
+        for est_name, er in estimator_results.items():
+            data_results[est_name] = {
+                'mse':     np.mean(er['mse']) if er['mse'] else float('nan'),
+                'r2':      np.mean(er['r2']) if er['r2'] else float('nan'),
+                'time':    np.mean(er['time']),
+                'p':       np.mean(er['p']),
+                'n_train': int(X_train.shape[0]),
+                'lambda':  np.mean(er['lambda']) if er['lambda'] else float('nan'),
+                'iter':    np.mean(er['iter']) if er['iter'] else 100,
+                'CA':      np.mean(er['CA']) if er['CA'] else float('nan'),
+                'q':       np.mean(er['q']) if er['q'] else float('nan'),
+            }
+        results[name] = data_results
+
+    return results
