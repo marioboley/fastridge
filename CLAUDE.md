@@ -42,3 +42,14 @@ Jupyter notebooks and experiment scripts in `Analysis/` use the library for empi
 Selected notebooks are run as part of `pytest` via `nbmake` (see `pytest.ini`). Cells tagged `skip-execution` are skipped during testing — used for heavy experiment cells that are too slow for routine runs.
 
 **Editing notebooks:** Always use the `Read` tool (not Bash) before `NotebookEdit`, and specify `cell_id` from the Read output. The notebook must not be open in VSCode at the same time — the extension modifies the file on save, causing write conflicts. The `NotebookEdit` tool does not show a diff preview; announce the intended change in plain text before applying it.
+
+## Refactoring Rules
+
+When integrating or refactoring existing code (e.g. moving analysis scripts into `experiments/`), every behaviour change must be explicitly identified, communicated to the user, and approved before implementation — even changes that appear neutral or beneficial.
+
+**Before completing any refactoring step:**
+- Audit every public method or function being replaced: do the new implementations preserve exact input/output behaviour?
+- Identify all differences, including subtle ones such as normalization conventions, attribute naming, data flow through notebook session state, and global matplotlib rc state.
+- Present each difference to the user with options (preserve or change) before proceeding.
+
+This applies even to "obviously correct" fixes — the user decides whether to fix or preserve existing behaviour. Undiscovered behaviour changes in notebooks are particularly costly because they are only detectable by visual inspection of figure output.
