@@ -1,3 +1,8 @@
 *
 !.gitignore
+!abalone.csv
+!airfoil.csv
+!concrete.csv
+!forest.csv
+!student.csv
 !yacht.csv

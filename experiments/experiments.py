@@ -204,7 +204,7 @@ class RidgePathExperiment:
         return self
 
 
-def RealDataExperiment(dataframes, targets, names, estimators={}, n_iterations=100,
+def run_real_data_experiments(dataframes, targets, names, estimators={}, n_iterations=100,
                        test_prop=0.3, seed=None, polynomial=None, classification=False,
                        verbose=True):
     """Run repeated train/test experiments on a list of DataFrames.
@@ -233,7 +233,7 @@ def RealDataExperiment(dataframes, targets, names, estimators={}, n_iterations=1
         y = df[target]
 
         if verbose:
-            print(name)
+            print(name, end=' ')
 
         categorical_cols = [col for col in X.columns if not pd.api.types.is_numeric_dtype(X[col])]
         encoder = OneHotEncoder(drop='first', sparse_output=False)
@@ -256,8 +256,9 @@ def RealDataExperiment(dataframes, targets, names, estimators={}, n_iterations=1
                 X = pd.concat([X, X_poly], axis=1)
             else:
                 X = X_poly
-            if verbose:
-                print(X.shape)
+
+        if verbose:
+            print(f'(n={X.shape[1]}, p={X.shape[1]})', end='')
 
         estimator_results = {
             est_name: {'mse': [], 'r2': [], 'time': [], 'p': [], 'lambda': [], 'iter': [], 'CA': [], 'q': []}
@@ -269,7 +270,7 @@ def RealDataExperiment(dataframes, targets, names, estimators={}, n_iterations=1
 
         for i in range(n_iterations):
             if verbose:
-                print(i, end='')
+                print('.', end='')
             X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_prop)
             std = X_train.std()
             non_zero_std_cols = std[std != 0].index
@@ -310,5 +311,6 @@ def RealDataExperiment(dataframes, targets, names, estimators={}, n_iterations=1
                 'q':       np.mean(er['q']) if er['q'] else float('nan'),
             }
         results[name] = data_results
+        if verbose: print()
 
     return results
