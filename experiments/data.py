@@ -8,7 +8,10 @@ Dataset registry and retrieval for real data experiments.
 >>> df.shape
 (442, 11)
 """
+import io
+import urllib.request
 import warnings
+import zipfile
 from pathlib import Path
 
 import pandas as pd
@@ -56,20 +59,41 @@ def from_url(url, **read_csv_kwargs):
     return source
 
 
-_YACHT_COLS = ['Longitudinal_position', 'Prismatic_coefficient', 'Length_displacement_ratio',
-               'Beam_draught_ratio', 'Length_beam_ratio', 'Froude_number', 'Residuary_resistance']
+def from_zip(url, entry, **read_csv_kwargs):
+    """Return a source callable that downloads a ZIP and reads one entry as a DataFrame.
+
+    Extra keyword arguments are forwarded to pd.read_csv.
+    """
+    def source():
+        with urllib.request.urlopen(url) as resp:
+            zf = zipfile.ZipFile(io.BytesIO(resp.read()))
+        data = zf.read(entry).decode('latin-1')
+        return pd.read_csv(io.StringIO(data), **read_csv_kwargs)
+    return source
+
 
 from sklearn.datasets import load_diabetes  # noqa: E402
 
-REGISTRY = {
+DATASETS = {
     'abalone':          {'sources': [from_ucimlrepo(1)]},
     'autompg':          {'sources': [from_ucimlrepo(9)]},
     'automobile':       {'sources': [from_ucimlrepo(10)]},
     'airfoil':          {'sources': [from_ucimlrepo(291)]},
-    'bh':               {'sources': [from_url('https://raw.githubusercontent.com/selva86/datasets/master/BostonHousing.csv')]},
+    'boston':           {'sources': [from_url('https://raw.githubusercontent.com/selva86/datasets/master/BostonHousing.csv')]},
     'crime':            {'sources': [from_ucimlrepo(183)]},
     'concrete':         {'sources': [from_ucimlrepo(165)]},
-    'naval_propulsion': {'sources': []},  # not available via ucimlrepo; URL TBD
+    'naval_propulsion': {'sources': [
+        from_ucimlrepo(316),
+        from_zip(
+            'https://cdn.uci-ics-mlr-prod.aws.uci.edu/316/'
+            'condition%2Bbased%2Bmaintenance%2Bof%2Bnaval%2Bpropulsion%2Bplants.zip',
+            'UCI CBM Dataset/data.txt',
+            sep=r'\s+', header=None,
+            names=['lp', 'v', 'GTT', 'GTn', 'GGn', 'Ts', 'Tp', 'T48', 'T1', 'T2',
+                   'P48', 'P1', 'P2', 'Pexh', 'TIC', 'mf',
+                   'GT_compressor_decay', 'GT_turbine_decay'],
+        ),
+    ]},
     'diabetes':         {'sources': [from_sklearn(load_diabetes)]},
     'eye':              {'sources': []},  # URL TBD
     'facebook':         {'sources': [from_ucimlrepo(368)]},
@@ -78,7 +102,11 @@ REGISTRY = {
     'real_estate':      {'sources': [from_ucimlrepo(477)]},
     'student':          {'sources': [from_ucimlrepo(320)]},
     'yacht':            {'sources': [from_url('https://archive.ics.uci.edu/ml/machine-learning-databases/00243/yacht_hydrodynamics.data',
-                                              sep=r'\s+', header=None, names=_YACHT_COLS)]},
+                                              sep=r'\s+', header=None,
+                                              names=['Longitudinal_position', 'Prismatic_coefficient',
+                                                     'Length_displacement_ratio', 'Beam_draught_ratio',
+                                                     'Length_beam_ratio', 'Froude_number',
+                                                     'Residuary_resistance'])]},
     'ribo':             {'sources': []},  # URL TBD
     'crop':             {'sources': []},  # URL TBD
     'elec_devices':     {'sources': []},  # URL TBD
@@ -103,14 +131,14 @@ def get_dataset(name):
     >>> df.shape
     (442, 11)
     """
-    if name not in REGISTRY:
-        raise KeyError(f"Unknown dataset: '{name}'. Available: {list(REGISTRY)}")
+    if name not in DATASETS:
+        raise KeyError(f"Unknown dataset: '{name}'. Available: {list(DATASETS)}")
 
     cache_path = CACHE_DIR / f'{name}.csv'
     if cache_path.exists():
         return pd.read_csv(cache_path)
 
-    sources = REGISTRY[name]['sources']
+    sources = DATASETS[name]['sources']
     last_exc = None
     for source in sources:
         try:
