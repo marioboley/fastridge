@@ -235,7 +235,7 @@ def RealDataExperiment(dataframes, targets, names, estimators={}, n_iterations=1
         if verbose:
             print(name)
 
-        categorical_cols = [col for col in X.columns if X[col].dtype in ['object', 'category']]
+        categorical_cols = [col for col in X.columns if not pd.api.types.is_numeric_dtype(X[col])]
         encoder = OneHotEncoder(drop='first', sparse_output=False)
         if categorical_cols:
             encoded_X = encoder.fit_transform(X[categorical_cols])
