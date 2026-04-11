@@ -35,13 +35,30 @@ Both classes follow the scikit-learn estimator API (`fit(X, y)` / `predict(X)`) 
 
 **`RidgeLOOCV` internals**: Vectorizes LOOCV over the alpha grid. Hat matrix diagonal `h` is computed without forming the full hat matrix: `h_i = sum_j (U_ij * s_j)^2 / (s_j^2 + alpha)`. LOO MSE is `mean((residual / (1 - h))^2)`.
 
-## Analysis
+## Experiments Module
 
-Jupyter notebooks and experiment scripts in `Analysis/` use the library for empirical evaluation. These are research/exploration code, not part of the package.
+`experiments/` contains the reproducible experiment infrastructure:
 
-Selected notebooks are run as part of `pytest` via `nbmake` (see `pytest.ini`). Cells tagged `skip-execution` are skipped during testing — used for heavy experiment cells that are too slow for routine runs.
+- **`problems.py`**: problem classes — `linear_problem` (synthetic, has `rvs()`) and `EmpiricalDataProblem` (real data, has `get_X_y()`). These are intended to be unified in a future refactor.
+- **`experiments.py`**: experiment runners — `Experiment` (synthetic), `RidgePathExperiment`, `run_real_data_experiments(problems, estimators, ...)` which takes a list of `EmpiricalDataProblem` and returns a parallel list of result dicts.
+- **`data.py`**: dataset registry (`DATASETS`) and retrieval (`get_dataset(name)`). Sources: `from_sklearn`, `from_ucimlrepo`, `from_url`, `from_zip`. Tier-1 only — raw DataFrames, no target selection.
+- **Notebooks** (`real_data.ipynb`, `tutorial.ipynb`, `sparse_designs.ipynb`, `double_asymptotic_trends.ipynb`): run via `nbmake` in CI. Cells tagged `skip-execution` are skipped — used for expensive full-experiment cells.
+
+`Analysis/` contains legacy research notebooks. These are not part of CI and may depend on local files not in the repository.
 
 **Editing notebooks:** Always use the `Read` tool (not Bash) before `NotebookEdit`, and specify `cell_id` from the Read output. The notebook must not be open in VSCode at the same time — the extension modifies the file on save, causing write conflicts. The `NotebookEdit` tool does not show a diff preview; announce the intended change in plain text before applying it.
+
+**Notebook tables:** Prefer returning a DataFrame as the last expression in a cell (pandas/notebook native rendering) over `tabulate` or `print`. No extra dependency, interactive in JupyterLab.
+
+## Coding Conventions
+
+**Class names:** UpperCamelCase / PascalCase (Python standard — each word capitalised, no separators). `linear_problem` in `experiments/problems.py` is a legacy exception — do not replicate it; new classes use PascalCase.
+
+**Function and method names:** snake_case.
+
+**Module names:** single word, no underscores (e.g. `data`, `problems`, `experiments`).
+
+**Imports:** Default to top-level imports. Inline imports (`from x import y` inside a function) are acceptable only for optional external dependencies that may not be installed in all environments (e.g. `ucimlrepo` is not a package dependency). When using an inline import, add a module-level comment documenting the optional dependency so it is visible without reading function bodies. Raise the question with the user if a new case arises — the rule may evolve.
 
 ## Refactoring Rules
 
