@@ -2,6 +2,7 @@
 !.gitignore
 !abalone.csv
 !airfoil.csv
+!automobile.csv
 !concrete.csv
 !forest.csv
 !student.csv
