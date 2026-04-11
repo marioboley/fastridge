@@ -7,14 +7,26 @@ Dataset registry and retrieval for real data experiments.
 >>> df = get_dataset('diabetes')
 >>> df.shape
 (442, 11)
+>>> from data import fetch_riboflavin
+>>> df_ribo = fetch_riboflavin()
+>>> df_ribo.shape
+(71, 4089)
+>>> list(df_ribo.columns[:3])
+['y', 'AADK_at', 'AAPA_at']
+>>> df_ribo['y'].dtype.kind
+'f'
 """
 import io
+import tarfile
+import tempfile
 import urllib.request
 import warnings
 import zipfile
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+# rdata is imported conditionally inside _fetch_cran_rdata and fetch_riboflavin
 
 CACHE_DIR = Path(__file__).parent.parent / 'datasets'
 
@@ -72,6 +84,93 @@ def from_zip(url, entry, **read_csv_kwargs):
     return source
 
 
+def _fetch_cran_rdata(package, version, rdata_path):
+    """Download a CRAN package tarball and return the parsed R object at rdata_path.
+
+    Fetches https://cran.r-project.org/src/contrib/{package}_{version}.tar.gz,
+    extracts the file at rdata_path, parses it with rdata.parser.parse_file,
+    and returns the parsed R object (not yet converted to a DataFrame).
+    """
+    import rdata
+    url = f'https://cran.r-project.org/src/contrib/{package}_{version}.tar.gz'
+    raw = urllib.request.urlopen(url).read()
+    with tarfile.open(fileobj=io.BytesIO(raw)) as t:
+        f = t.extractfile(rdata_path)
+        tmp = tempfile.NamedTemporaryFile(suffix='.RData', delete=False)
+        tmp.write(f.read())
+        tmp.close()
+    return rdata.parser.parse_file(tmp.name)
+
+
+def from_cran(package, version, rdata_path):
+    """Return a source callable that fetches an R dataset from a CRAN package.
+
+    The RData file at rdata_path must contain a single flat R data.frame that
+    rdata.conversion.convert() can map directly to a pandas DataFrame.
+    For datasets with non-standard R structures (e.g. matrix-valued columns),
+    write a dedicated source callable that calls _fetch_cran_rdata directly.
+    """
+    def source():
+        import rdata
+        parsed = _fetch_cran_rdata(package, version, rdata_path)
+        converted = rdata.conversion.convert(parsed)
+        return converted[list(converted.keys())[0]]
+    return source
+
+
+def fetch_riboflavin():
+    """Fetch the riboflavin dataset from the hdi CRAN package (version 0.1-10).
+
+    Returns a DataFrame with 71 rows and 4089 columns: 'y' (log riboflavin
+    production rate) followed by 4088 gene expression columns (e.g. 'AADK_at').
+
+    The hdi RData structure is a data.frame with a matrix-valued column x
+    (71x4088) and a scalar column y — not convertible by rdata's standard
+    converter, hence the custom unpacking below.
+    """
+    from rdata.parser._parser import RObjectType
+    parsed = _fetch_cran_rdata('hdi', '0.1-10', 'hdi/data/riboflavin.RData')
+    robj = parsed.object.value[0]
+    y_robj = robj.value[0]   # REAL vector, length 71
+    x_robj = robj.value[1]   # REAL vector, length 71*4088, with dim/dimnames attrs
+
+    def _pairlist_to_dict(obj):
+        result = {}
+        cur = obj
+        while cur is not None and cur.info.type not in (RObjectType.NILVALUE,):
+            if cur.info.type == RObjectType.LIST:
+                tag = cur.tag
+                if tag is not None:
+                    name = tag.value.value
+                    if isinstance(name, bytes):
+                        name = name.decode()
+                    result[name] = cur.value[0]
+                cur = cur.value[1] if len(cur.value) > 1 else None
+            else:
+                break
+        return result
+
+    def _extract_strvec(obj):
+        if obj.info.type in (RObjectType.VEC, RObjectType.STR):
+            return [v.value.decode() if isinstance(v.value, bytes) else str(v.value)
+                    for v in obj.value]
+        return []
+
+    x_attrs = _pairlist_to_dict(x_robj.attributes)
+    dim = [int(v) for v in x_attrs['dim'].value]
+    dimnames = x_attrs['dimnames'].value
+    rownames = _extract_strvec(dimnames[0])
+    colnames = _extract_strvec(dimnames[1])
+
+    x = pd.DataFrame(
+        np.array(x_robj.value).reshape(dim, order='F'),
+        index=rownames,
+        columns=colnames,
+    )
+    y = pd.Series(np.array(y_robj.value), index=rownames, name='y')
+    return pd.concat([y, x], axis=1).reset_index(drop=True)
+
+
 from sklearn.datasets import load_diabetes  # noqa: E402
 
 DATASETS = {
@@ -120,7 +219,7 @@ DATASETS = {
                                                      'Length_displacement_ratio', 'Beam_draught_ratio',
                                                      'Length_beam_ratio', 'Froude_number',
                                                      'Residuary_resistance'])]},
-    'ribo':             {'sources': []},  # URL TBD
+    'ribo':             {'sources': [fetch_riboflavin]},
     'crop':             {'sources': []},  # URL TBD
     'elec_devices':     {'sources': []},  # URL TBD
     'starlight':        {'sources': []},  # URL TBD
