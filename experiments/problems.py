@@ -9,6 +9,14 @@ Problem classes for simulated and empirical data experiments.
 >>> X2, y2 = p_drop.get_X_y()
 >>> X2.shape
 (308, 6)
+>>> p_none = EmpiricalDataProblem('automobile', 'price')
+>>> X_none, y_none = p_none.get_X_y()
+>>> X_none.shape[0]
+201
+>>> p_drop2 = EmpiricalDataProblem('automobile', 'price', nan_policy='drop_rows')
+>>> X_drop2, y_drop2 = p_drop2.get_X_y()
+>>> X_drop2.shape[0]
+159
 """
 import warnings
 
@@ -20,10 +28,11 @@ from data import get_dataset
 
 class EmpiricalDataProblem:
 
-    def __init__(self, dataset, target, drop=None):
+    def __init__(self, dataset, target, drop=None, nan_policy=None):
         self.dataset = dataset
         self.target = target
         self.drop = drop or []
+        self.nan_policy = nan_policy
 
     def get_X_y(self):
         df = get_dataset(self.dataset)
@@ -32,6 +41,9 @@ class EmpiricalDataProblem:
             # warn rather than error — drop list may include columns absent in some sources
             warnings.warn(f"Columns not found in '{self.dataset}', skipping drop: {missing}")
         df = df.drop(columns=[c for c in self.drop if c in df.columns])
+        df = df.dropna(subset=[self.target])
+        if self.nan_policy == 'drop_rows':
+            df = df.dropna()
         return df.drop(columns=[self.target]), df[self.target]
 
 
