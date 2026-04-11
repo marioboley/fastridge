@@ -113,7 +113,7 @@ DATASETS = {
     'forest':           {'sources': [from_ucimlrepo(162)]},
     'parkinsons':       {'sources': [from_ucimlrepo(189)]},
     'real_estate':      {'sources': [from_ucimlrepo(477)]},
-    'student':          {'sources': [from_ucimlrepo(320)]},
+    'student':          {'sources': [from_ucimlrepo(320)]},  # Portuguese only; see docs/superpowers/issues/2026-04-11-student-dataset-structure.md
     'yacht':            {'sources': [from_url('https://archive.ics.uci.edu/ml/machine-learning-databases/00243/yacht_hydrodynamics.data',
                                               sep=r'\s+', header=None,
                                               names=['Longitudinal_position', 'Prismatic_coefficient',

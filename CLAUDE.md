@@ -45,6 +45,8 @@ Both classes follow the scikit-learn estimator API (`fit(X, y)` / `predict(X)`) 
 - **`data.py`**: dataset registry (`DATASETS`) and retrieval (`get_dataset(name)`). Sources: `from_sklearn`, `from_ucimlrepo`, `from_url`, `from_zip`. Tier-1 only — raw DataFrames, no target selection.
 - **Notebooks** (`real_data.ipynb`, `tutorial.ipynb`, `sparse_designs.ipynb`, `double_asymptotic_trends.ipynb`): run via `nbmake` in CI. Cells tagged `skip-execution` are skipped — used for expensive full-experiment cells.
 
+**Superpowers docs** live in `docs/superpowers/` with three subdirectories: `specs/` (approved designs), `plans/` (implementation plans), `issues/` (open questions and investigations — some may eventually become specs, others may not). All files are date-stamped (`YYYY-MM-DD-<topic>.md`).
+
 `Analysis/` contains legacy research notebooks. These are not part of CI and may depend on local files not in the repository.
 
 **Editing notebooks:** Always use the `Read` tool (not Bash) before `NotebookEdit`, and specify `cell_id` from the Read output. The notebook must not be open in VSCode at the same time — the extension modifies the file on save, causing write conflicts. The `NotebookEdit` tool does not show a diff preview; announce the intended change in plain text before applying it.
