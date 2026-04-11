@@ -127,6 +127,12 @@ DATASETS = {
 }
 
 
+# Additional missing value markers beyond pandas defaults:
+# '', 'NA', 'N/A', '#N/A', '#N/A N/A', '#NA', 'NaN', '-NaN', '-nan', 'nan',
+# 'None', '<NA>', 'NULL', 'null', 'n/a', '1.#IND', '-1.#IND', '1.#QNAN', '-1.#QNAN'
+_EXTRA_NA_VALUES = ['?']
+
+
 def get_dataset(name):
     """Retrieve a dataset by name, using the local cache if available.
 
@@ -148,21 +154,21 @@ def get_dataset(name):
         raise KeyError(f"Unknown dataset: '{name}'. Available: {list(DATASETS)}")
 
     cache_path = CACHE_DIR / f'{name}.csv'
-    if cache_path.exists():
-        return pd.read_csv(cache_path)
+    if not cache_path.exists():
+        sources = DATASETS[name]['sources']
+        last_exc = None
+        for source in sources:
+            try:
+                df = source()
+                CACHE_DIR.mkdir(exist_ok=True)
+                df.to_csv(cache_path, index=False)
+                break
+            except Exception as exc:
+                last_exc = exc
+        else:
+            raise RuntimeError(
+                f"All sources failed for dataset '{name}'."
+                + (f" Last error: {last_exc}" if last_exc else " No sources configured.")
+            )
 
-    sources = DATASETS[name]['sources']
-    last_exc = None
-    for source in sources:
-        try:
-            df = source()
-            CACHE_DIR.mkdir(exist_ok=True)
-            df.to_csv(cache_path, index=False)
-            return df
-        except Exception as exc:
-            last_exc = exc
-
-    raise RuntimeError(
-        f"All sources failed for dataset '{name}'."
-        + (f" Last error: {last_exc}" if last_exc else " No sources configured.")
-    )
+    return pd.read_csv(cache_path, na_values=_EXTRA_NA_VALUES)
