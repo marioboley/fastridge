@@ -1,5 +1,32 @@
+"""
+Problem classes for simulated and empirical data experiments.
+
+>>> p = EmpiricalDataProblem('diabetes', 'target')
+>>> X, y = p.get_X_y()
+>>> X.shape
+(442, 10)
+>>> p_drop = EmpiricalDataProblem('yacht', 'Residuary_resistance', drop=[])
+>>> X2, y2 = p_drop.get_X_y()
+>>> X2.shape
+(308, 6)
+"""
 import numpy as np
 from scipy.stats import wishart, multivariate_normal, uniform
+
+from data import get_dataset
+
+
+class EmpiricalDataProblem:
+
+    def __init__(self, dataset, target, drop=None):
+        self.dataset = dataset
+        self.target = target
+        self.drop = drop or []
+
+    def get_X_y(self):
+        df = get_dataset(self.dataset)
+        df = df.drop(columns=self.drop)
+        return df.drop(columns=[self.target]), df[self.target]
 
 
 class linear_problem:
