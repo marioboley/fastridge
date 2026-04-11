@@ -21,6 +21,12 @@ True
 159
 >>> list(X_auto_drop.index) == list(y_auto_drop.index) == list(range(159))
 True
+>>> p_auto_cols = EmpiricalDataProblem('automobile', 'price', nan_policy='drop_cols')
+>>> X_auto_cols, y_auto_cols = p_auto_cols.get_X_y()
+>>> X_auto_cols.shape
+(201, 19)
+>>> list(X_auto_cols.index) == list(y_auto_cols.index) == list(range(201))
+True
 """
 import warnings
 
@@ -48,6 +54,8 @@ class EmpiricalDataProblem:
         df = df.dropna(subset=[self.target])
         if self.nan_policy == 'drop_rows':
             df = df.dropna()
+        elif self.nan_policy == 'drop_cols':
+            df = df.dropna(axis=1)
         df = df.reset_index(drop=True)
         return df.drop(columns=[self.target]), df[self.target]
 
