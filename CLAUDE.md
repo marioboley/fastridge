@@ -19,7 +19,8 @@ See the **Project Setup** section in `README.md` for environment setup instructi
 - Day-to-day work goes on the `dev` branch; `main` is kept green
 - CI runs on push to both `dev` and `main` via `.github/workflows/ci.yml` — two jobs: `package-test` (package deps only, doctest) and `project-test` (full requirements, all tests)
 - Run all tests via `pytest` before commit
-- All local Python processs use dedicated virtual environment 
+- All local Python processs use dedicated virtual environment
+- When finishing a development branch: push to `dev` first, wait for CI, then merge to `main`
 
 ## Architecture
 
