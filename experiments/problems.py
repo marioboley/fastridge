@@ -44,6 +44,7 @@ class EmpiricalDataProblem:
         df = df.dropna(subset=[self.target])
         if self.nan_policy == 'drop_rows':
             df = df.dropna()
+        df = df.reset_index(drop=True)
         return df.drop(columns=[self.target]), df[self.target]
 
 
