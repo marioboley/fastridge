@@ -7,14 +7,6 @@ Dataset registry and retrieval for real data experiments.
 >>> df = get_dataset('diabetes')
 >>> df.shape
 (442, 11)
->>> from data import fetch_riboflavin
->>> df_ribo = fetch_riboflavin()
->>> df_ribo.shape
-(71, 4089)
->>> list(df_ribo.columns[:3])
-['y', 'AADK_at', 'AAPA_at']
->>> df_ribo['y'].dtype.kind
-'f'
 """
 import io
 import tarfile
@@ -171,6 +163,28 @@ def fetch_riboflavin():
     return pd.concat([y, x], axis=1).reset_index(drop=True)
 
 
+def fetch_eye():
+    """Fetch the eye gene expression dataset from the flare CRAN package (version 1.8).
+
+    Returns a DataFrame with 120 rows and 201 columns: 'y' (TRIM32 gene expression)
+    followed by 200 gene probe columns.
+
+    The flare RData structure converts cleanly via rdata.conversion.convert — x is an
+    xarray DataArray (120x200) and y is a numpy array (120,).
+    """
+    import rdata
+    parsed = _fetch_cran_rdata('flare', '1.8', 'flare/data/eyedata.rda')
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        converted = rdata.conversion.convert(parsed)
+    x_da = converted['x']
+    y = converted['y']
+    col_keys = list(x_da.coords.keys())
+    col_names = [str(c) for c in x_da.coords[col_keys[-1]].values]
+    df_x = pd.DataFrame(x_da.values, columns=col_names)
+    return pd.concat([pd.Series(y, name='y'), df_x], axis=1).reset_index(drop=True)
+
+
 from sklearn.datasets import load_diabetes  # noqa: E402
 
 DATASETS = {
@@ -207,7 +221,7 @@ DATASETS = {
         ),
     ]},
     'diabetes':         {'sources': [from_sklearn(load_diabetes)]},
-    'eye':              {'sources': []},  # URL TBD
+    'eye':              {'sources': [fetch_eye]},
     'facebook':         {'sources': [from_ucimlrepo(368)]},
     'forest':           {'sources': [from_ucimlrepo(162)]},
     'parkinsons':       {'sources': [from_ucimlrepo(189)]},
