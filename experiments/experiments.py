@@ -257,7 +257,7 @@ def run_real_data_experiments(problems, estimators={}, n_iterations=100,
                 X = X_poly
 
         if verbose:
-            print(f'(n={X.shape[1]}, p={X.shape[1]})', end='')
+            print(f'(n={X.shape[0]}, p={X.shape[1]})', end='')
 
         estimator_results = {
             est_name: {'mse': [], 'r2': [], 'time': [], 'p': [], 'lambda': [], 'iter': [], 'CA': [], 'q': []}
