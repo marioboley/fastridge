@@ -76,7 +76,20 @@ from sklearn.datasets import load_diabetes  # noqa: E402
 
 DATASETS = {
     'abalone':          {'sources': [from_ucimlrepo(1)]},
-    'autompg':          {'sources': [from_ucimlrepo(9)]},
+    'autompg':          {'sources': [
+        from_ucimlrepo(9),
+        from_zip(
+            'https://cdn.uci-ics-mlr-prod.aws.uci.edu/9/auto%2Bmpg.zip',
+            'auto-mpg.data',
+            sep=r'\s+', header=None, na_values='?',
+            names=['mpg', 'cylinders', 'displacement', 'horsepower', 'weight',
+                   'acceleration', 'model_year', 'origin', 'car_name'],
+        ),
+        # TODO: verify whether from_ucimlrepo includes car_name in features; if not,
+        # sources are inconsistent and car_name should be dropped at source level.
+        # Also: ucimlrepo has been unavailable frequently — review all ucimlrepo sources
+        # and add CDN ZIP fallbacks where possible.
+    ]},
     'automobile':       {'sources': [from_ucimlrepo(10)]},
     'airfoil':          {'sources': [from_ucimlrepo(291)]},
     'boston':           {'sources': [from_url('https://raw.githubusercontent.com/selva86/datasets/master/BostonHousing.csv')]},

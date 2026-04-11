@@ -10,6 +10,8 @@ Problem classes for simulated and empirical data experiments.
 >>> X2.shape
 (308, 6)
 """
+import warnings
+
 import numpy as np
 from scipy.stats import wishart, multivariate_normal, uniform
 
@@ -25,7 +27,11 @@ class EmpiricalDataProblem:
 
     def get_X_y(self):
         df = get_dataset(self.dataset)
-        df = df.drop(columns=self.drop)
+        missing = [c for c in self.drop if c not in df.columns]
+        if missing:
+            # warn rather than error — drop list may include columns absent in some sources
+            warnings.warn(f"Columns not found in '{self.dataset}', skipping drop: {missing}")
+        df = df.drop(columns=[c for c in self.drop if c in df.columns])
         return df.drop(columns=[self.target]), df[self.target]
 
 
