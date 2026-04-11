@@ -204,19 +204,15 @@ class RidgePathExperiment:
         return self
 
 
-def run_real_data_experiments(dataframes, targets, names, estimators={}, n_iterations=100,
-                       test_prop=0.3, seed=None, polynomial=None, classification=False,
-                       verbose=True):
-    """Run repeated train/test experiments on a list of DataFrames.
+def run_real_data_experiments(problems, estimators={}, n_iterations=100,
+                              test_prop=0.3, seed=None, polynomial=None,
+                              classification=False, verbose=True):
+    """Run repeated train/test experiments on a list of EmpiricalDataProblem instances.
 
     Parameters
     ----------
-    dataframes : list of pd.DataFrame
-        Raw datasets (full DataFrames from get_dataset).
-    targets : list of str
-        Target column name for each dataset.
-    names : list of str
-        Display name for each dataset (used as result dict key).
+    problems : list of EmpiricalDataProblem
+        Each problem specifies dataset, target column, and columns to drop.
     estimators : dict mapping str to estimator
     n_iterations : int
     test_prop : float
@@ -224,16 +220,19 @@ def run_real_data_experiments(dataframes, targets, names, estimators={}, n_itera
     polynomial : int or None
     classification : bool
     verbose : bool
+
+    Returns
+    -------
+    list of dict
+        One result dict per problem, parallel to the input list. Each dict maps
+        estimator name to a dict of aggregated metrics.
     """
-    results = {}
-    for j, df in enumerate(dataframes):
-        name = names[j]
-        target = targets[j]
-        X = df.drop([target], axis=1)
-        y = df[target]
+    results = []
+    for problem in problems:
+        X, y = problem.get_X_y()
 
         if verbose:
-            print(name, end=' ')
+            print(problem.dataset, end=' ')
 
         categorical_cols = [col for col in X.columns if not pd.api.types.is_numeric_dtype(X[col])]
         encoder = OneHotEncoder(drop='first', sparse_output=False)
@@ -310,7 +309,8 @@ def run_real_data_experiments(dataframes, targets, names, estimators={}, n_itera
                 'CA':      np.mean(er['CA']) if er['CA'] else float('nan'),
                 'q':       np.mean(er['q']) if er['q'] else float('nan'),
             }
-        results[name] = data_results
-        if verbose: print()
+        results.append(data_results)
+        if verbose:
+            print()
 
     return results
