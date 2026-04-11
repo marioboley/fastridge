@@ -9,14 +9,18 @@ Problem classes for simulated and empirical data experiments.
 >>> X2, y2 = p_drop.get_X_y()
 >>> X2.shape
 (308, 6)
->>> p_none = EmpiricalDataProblem('automobile', 'price')
->>> X_none, y_none = p_none.get_X_y()
->>> X_none.shape[0]
+>>> p_auto = EmpiricalDataProblem('automobile', 'price')
+>>> X_auto, y_auto = p_auto.get_X_y()
+>>> X_auto.shape[0]
 201
->>> p_drop2 = EmpiricalDataProblem('automobile', 'price', nan_policy='drop_rows')
->>> X_drop2, y_drop2 = p_drop2.get_X_y()
->>> X_drop2.shape[0]
+>>> list(X_auto.index) == list(y_auto.index) == list(range(201))
+True
+>>> p_auto_drop = EmpiricalDataProblem('automobile', 'price', nan_policy='drop_rows')
+>>> X_auto_drop, y_auto_drop = p_auto_drop.get_X_y()
+>>> X_auto_drop.shape[0]
 159
+>>> list(X_auto_drop.index) == list(y_auto_drop.index) == list(range(159))
+True
 """
 import warnings
 
