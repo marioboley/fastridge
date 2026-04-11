@@ -10,3 +10,4 @@ nbmake>=1.0
 ipykernel>=6.0
 ucimlrepo>=0.0.3
 tabulate>=0.9
+rdata>=0.10
