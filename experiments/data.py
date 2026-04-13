@@ -63,16 +63,40 @@ def from_url(url, **read_csv_kwargs):
     return source
 
 
+def _read_zip_entry(url, entry):
+    with urllib.request.urlopen(url) as resp:
+        zf = zipfile.ZipFile(io.BytesIO(resp.read()))
+    return zf.read(entry)
+
+
+def _read_tar_entry(data, entry):
+    with tarfile.open(fileobj=io.BytesIO(data)) as tf:
+        return tf.extractfile(entry).read()
+
+
 def from_zip(url, entry, **read_csv_kwargs):
     """Return a source callable that downloads a ZIP and reads one entry as a DataFrame.
 
     Extra keyword arguments are forwarded to pd.read_csv.
     """
     def source():
-        with urllib.request.urlopen(url) as resp:
-            zf = zipfile.ZipFile(io.BytesIO(resp.read()))
-        data = zf.read(entry).decode('latin-1')
-        return pd.read_csv(io.StringIO(data), **read_csv_kwargs)
+        return pd.read_csv(
+            io.StringIO(_read_zip_entry(url, entry).decode('latin-1')), **read_csv_kwargs)
+    return source
+
+
+def from_zip_tar(url, zip_entry, tar_entry, **read_csv_kwargs):
+    """Return a source callable that downloads a ZIP containing a tar and reads one entry.
+
+    zip_entry is the tar filename inside the ZIP; tar_entry is the CSV path inside the tar.
+    Extra keyword arguments are forwarded to pd.read_csv.
+    """
+    def source():
+        return pd.read_csv(
+            io.StringIO(
+                _read_tar_entry(
+                    _read_zip_entry(url, zip_entry), tar_entry).decode('latin-1')),
+            **read_csv_kwargs)
     return source
 
 
