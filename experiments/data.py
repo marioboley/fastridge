@@ -258,6 +258,35 @@ DATASETS = {
                                                      'Length_beam_ratio', 'Froude_number',
                                                      'Residuary_resistance'])]},
     'ribo':             {'sources': [fetch_riboflavin]},
+    'blog':      {'sources': [
+        from_ucimlrepo(304),
+        from_zip(                                                    # CDN fallback (train split only)
+            'https://cdn.uci-ics-mlr-prod.aws.uci.edu/304/blogfeedback.zip',
+            'blogData_train.csv',
+            header=None, names=[f'V{i}' for i in range(1, 282)]
+        ),
+    ]},
+    # ct_slices CDN returns 403 programmatically; internal ZIP filename unverified.
+    'ct_slices': {'sources': [
+        from_ucimlrepo(206),
+        from_zip(
+            'https://cdn.uci-ics-mlr-prod.aws.uci.edu/206/'
+            'relative%2Blocation%2Bct%2Bslices%2Bon%2Baxial%2Baxis.zip',
+            'slice_localization_data.csv'
+        ),
+    ]},
+    'tomshw':    {'sources': [from_zip_tar(
+        'https://cdn.uci-ics-mlr-prod.aws.uci.edu/248/buzz%2Bin%2Bsocial%2Bmedia.zip',
+        'regression.tar.gz',
+        './regression/TomsHardware/TomsHardware.data',
+        header=None, names=[f'V{i}' for i in range(1, 98)]
+    )]},
+    'twitter':   {'sources': [from_zip_tar(
+        'https://cdn.uci-ics-mlr-prod.aws.uci.edu/248/buzz%2Bin%2Bsocial%2Bmedia.zip',
+        'regression.tar.gz',
+        './regression/Twitter/Twitter.data',
+        header=None, names=[f'V{i}' for i in range(1, 79)]
+    )]},
     'crop':             {'sources': []},  # URL TBD
     'elec_devices':     {'sources': []},  # URL TBD
     'starlight':        {'sources': []},  # URL TBD
