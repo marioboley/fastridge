@@ -28,9 +28,11 @@ Table 2 column definitions: n and p are post-preprocessing (after NaN removal, O
 
 d=1 matches. At d=2 paper has 2 fewer features (51 vs 53) and substantially better EM R² (0.38 vs 0.30). At d=3 p* matches exactly (209) but EM R² diverges sharply (0.28 vs −0.66). The d=3 collapse for all three methods (Fix=−0.60, GLM=−0.60) in our results while paper shows Fix=0.12, GLM=0.12 suggests a preprocessing or data difference that becomes critical in the polynomial regime.
 
-**Candidate cause:** Legacy `abalone.csv` may have a log-transformed target (Rings is a count variable). Needs verification against the legacy file.
+**Ruled out:** Log/log1p target transform — verified by exact row-by-row comparison with legacy `abalone.csv` (targets identical, data source identical). Also ruled out: different zero-variance dropping logic — the current `run_real_data_experiments` and legacy `RealDataExperiments` perform per-fold dropping identically.
 
-**Fix:** Check legacy abalone.csv target distribution; apply log or log1p if confirmed.
+**Candidate cause:** The p* discrepancy at d=2 (51 vs 53) suggests a difference in the polynomial feature space — possibly caused by a different scikit-learn version generating different OHE column ordering or PolynomialFeatures output. With n:p ≈ 9.8 at d=3, the regime is not p>>n, so pure dimensionality is not the cause; the collapse of all three methods (EM/Fix/GLM) at d=3 suggests a feature space issue rather than an EM-specific one.
+
+**Status:** Open; root cause unresolved. The fact that all three methods collapse at d=3 (not just EM) points to a feature representation difference rather than a hyperparameter tuning issue.
 
 ---
 
@@ -43,9 +45,9 @@ d=1 matches. At d=2 paper has 2 fewer features (51 vs 53) and substantially bett
 
 At d=1 paper Fix=−0.74 while ours is 0.66 — fixed grid already fails in the paper. At d=2 (n:p=0.28) the paper's EM collapses to −0.89 while ours holds at 0.66. The paper's behaviour (EM failing when p>>n) is physically expected; our EM not failing is suspicious.
 
-**Candidate cause:** Our per-fold zero-variance column dropping likely removes many sparse interaction terms for crime, reducing effective p well below 5049. The paper may not drop zero-variance columns, leaving EM in the genuine p>>n regime where it fails. This is also consistent with d=1 Fix: if our effective p differs from the paper's, different lambda grids may be optimal.
+**Candidate cause unknown.** Zero-variance dropping logic is identical between current and legacy code (confirmed), so effective p at d=2 should match. Both report p*=5049. The d=1 Fix discrepancy (0.66 vs −0.74) is particularly striking — it suggests that the fixed lambda grid performs very differently, which could indicate a different NaN handling strategy changing which rows/columns are retained. Crime has many NaN values; our `nan_policy='drop_cols'` drops all columns with any NaN, which may differ from the legacy approach. A different set of retained columns would produce a different feature space and different lambda grid behaviour.
 
-**Fix:** Investigate effective p for crime across folds; consider whether zero-variance dropping is too aggressive for sparse datasets.
+**Next step:** Check legacy crime preprocessing (which columns were kept after NaN handling) against our current `drop_cols` output.
 
 ---
 
