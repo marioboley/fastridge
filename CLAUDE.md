@@ -63,6 +63,10 @@ Both classes follow the scikit-learn estimator API (`fit(X, y)` / `predict(X)`) 
 
 **Imports:** Default to top-level imports. Inline imports (`from x import y` inside a function) are acceptable only for optional external dependencies that may not be installed in all environments (e.g. `ucimlrepo` is not a package dependency). When using an inline import, add a module-level comment documenting the optional dependency so it is visible without reading function bodies. Raise the question with the user if a new case arises — the rule may evolve.
 
+## Production Capacity
+
+Prefer changes that improve future editability and tooling over silent workarounds. When you encounter a limitation that has a clean fix — a format upgrade, a missing abstraction, a tool incompatibility — flag it and offer the fix rather than working around it silently. Similarly, when code being touched has grown complex enough to impede future changes (deeply nested logic, overloaded functions, unclear boundaries), note it and offer a targeted simplification. The goal is not just to solve the immediate problem but to leave the project in a state where the next task is easier. A concrete example: notebooks in this repo may be nbformat 4.2 (no cell IDs), which prevents `NotebookEdit` from locating cells by ID. The right response is to offer upgrading to 4.5 (`jupyter nbconvert --to notebook --inplace <file>`), not to silently fall back to JSON manipulation.
+
 ## Refactoring Rules
 
 When integrating or refactoring existing code (e.g. moving analysis scripts into `experiments/`), every behaviour change must be explicitly identified, communicated to the user, and approved before implementation — even changes that appear neutral or beneficial.
