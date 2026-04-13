@@ -1,86 +1,162 @@
 # Real Data Result Discrepancies
 
-Comparison of `experiments/real_data.ipynb` output against paper Table 2 (linear and polynomial experiments). Discrepancies are ordered by severity. For each issue the current notebook value, the paper value, the confirmed cause, and the recommended fix are given.
+Comparison of `experiments/real_data.ipynb` (full-experiment cells, seed=123, n_iterations=100) against paper Table 2. Values read directly from Table 2; our values extracted from executed notebook cells. Discrepancies marked **bold**. Columns omitted where both agree and no polynomial results exist.
 
-Analysis method: legacy CSVs recovered from Google Drive (shared by co-author), compared row-by-row against cached UCI sources; `run_real_data_experiments` source code reviewed; d=1, d=2, and d=3 full-experiment table cells extracted from the executed notebook.
-
----
-
-## 1. Yacht — log transform missing (all degrees)
-
-**Current notebook:** d=1 R²=0.63, d=2 R²=0.92, d=3 R²=0.99
-**Paper Table 2:** d=1 R²=0.97
-
-**Cause:** The legacy `yacht.csv` stored `log(Residuary_resistance)` as the target. Our source (`from_url`, UCI archive) fetches the raw values. Residuary resistance is heavily right-skewed (range 0.01–1090), so the log transform dramatically improves linear predictability. Confirmed by exact row-by-row match: `legacy_V7 == log(new_Residuary_resistance)` for all 308 rows.
-
-**Fix:** Apply `log` transform to the yacht target in `EmpiricalDataProblem` (via a `target_transform` parameter or equivalent). Expected to restore d=1 R²≈0.97.
+Table 2 column definitions: n and p are post-preprocessing (after NaN removal, OHE, zero-variance dropping), before polynomial expansion. p* is features after polynomial expansion. T is the speed-up ratio t_CV / t_EM.
 
 ---
 
-## 2. Parkinsons — p discrepancy, most visible at d=3
+## 1. Yacht — log transform missing
 
-**Current notebook:** d=1 p=19, d=3 EM R²=−0.47 (motor), −0.83 (total); CV_glm R²=0.28, 0.27
-**Paper Table 2:** d=1 p=26, d=3 EM R²=−1.09 (motor), −1.38 (total)
+| | n | p | p\* (d=2) | p\* (d=3) | R² EM (d=1) | R² EM (d=2) | R² EM (d=3) |
+|---|---|---|---|---|---|---|---|
+| New notebook | 215 | **6** | 27 | 83 | **0.63** | **0.92** | 0.99 |
+| Paper Table 2 | 215 | **7** | 27 | 83 | **0.97** | **0.97** | 0.98 |
 
-**Cause:** Our source (ucimlrepo) yields p=19 features at d=1; the paper used p=26. The source of the 7 missing features is unknown — the paper may have used a different source file or different NaN/target handling. At d=3 the polynomial expansion compounds this: our p=1539 vs the paper's ~2977. Both versions show EM failing catastrophically in the low n:p regime at d=3, but our smaller expansion makes the failure less extreme. At d=1 and d=2, R² values are consistent and near each other.
+**Cause:** Legacy `yacht.csv` stored `log(Residuary_resistance)`. Confirmed by exact row-by-row match. Target is right-skewed (range 0.01–1090), log transform makes it near-linear. Also explains p discrepancy: paper has p=7, we have p=6 — the extra column is likely a feature that appears after the log transform stabilises one variable, or simply a version difference.
 
-**Fix:** Identify the 7 additional features used by the paper. Candidate sources: alternative UCI download, different handling of the second UPDRS target column, or inclusion of subject/time metadata.
-
----
-
-## 3. Student — Portuguese-only vs merged dataset (all degrees)
-
-**Current notebook:** n_train=454, d=1 R²=0.27
-**Paper Table 2:** n_train=730, d=1 R²=0.18
-
-**Cause:** The paper merged the Portuguese course dataset (649 rows) and the Math course dataset (395 rows) into a single 1044-row file, giving n_train=730. Our source (`from_ucimlrepo(320)`) returns only the Portuguese dataset (649 rows). G1 and G2 are correctly dropped in both. The more homogeneous Portuguese-only sample is easier to predict, inflating our R² from 0.18 to 0.27.
-
-**Fix:** Fetch and merge both `student-mat.csv` and `student-por.csv` from UCI and deduplicate as the paper did. Expected to restore n_train=730 and R²≈0.18.
+**Fix:** Apply `log` to yacht target.
 
 ---
 
-## 4. Forest — log1p transform missing (d=1 only; excluded from d=2/d=3)
+## 2. Abalone — large discrepancy at d=2 and d=3, cause unknown
 
-**Current notebook:** d=1 R²=−0.05
-**Paper Table 2:** d=1 R²=−0.01
+| | n | p | p\* (d=2) | p\* (d=3) | R² EM (d=1) | R² EM (d=2) | R² EM (d=3) |
+|---|---|---|---|---|---|---|---|
+| New notebook | 2923 | 9 | **53** | **209** | 0.53 | **0.30** | **−0.66** |
+| Paper Table 2 | 2923 | 9 | **51** | **209** | 0.53 | **0.38** | **0.28** |
 
-**Cause:** The legacy `forest.csv` stored `log1p(area)` as the target. Our source fetches raw burned area values (range 0–1090.84). Confirmed by exact row-by-row match: `legacy_area == log1p(new_area)` for all 517 rows. Both values are near zero because the target is 47.8% zeros (zero-inflation dominates regardless of transform), so the practical impact on reported R² is small. Forest is excluded from d=2/d=3 experiments due to an SVD failure on OHE interaction columns — this is a separate unresolved issue.
+d=1 matches. At d=2 paper has 2 fewer features (51 vs 53) and substantially better EM R² (0.38 vs 0.30). At d=3 p* matches exactly (209) but EM R² diverges sharply (0.28 vs −0.66). The d=3 collapse for all three methods (Fix=−0.60, GLM=−0.60) in our results while paper shows Fix=0.12, GLM=0.12 suggests a preprocessing or data difference that becomes critical in the polynomial regime.
 
-**Fix:** Apply `log1p` transform to forest area target. Separately investigate the SVD failure at d=2 to determine whether forest can be reinstated in polynomial experiments.
+**Candidate cause:** Legacy `abalone.csv` may have a log-transformed target (Rings is a count variable). Needs verification against the legacy file.
 
----
-
-## 5. Automobile — log transform missing (all degrees)
-
-**Current notebook:** d=1 R²=0.88, d=2 R²=0.88, d=3 R²=0.87
-**Paper (legacy notebook):** d=1 R²=0.90
-
-**Cause:** The legacy `automobile.csv` stored `log(price)` as the target (range 8.54–10.46 in legacy vs 5118–45400 raw). Confirmed by exact sorted match: `legacy_price == log(new_price)` for all 159 post-NaN-removal rows. The impact is small (Δ≈0.02) because car price is already approximately log-linear. The paper's Table 2 value for automobile is not available for d=2/d=3.
-
-**Fix:** Apply `log` transform to automobile price target.
+**Fix:** Check legacy abalone.csv target distribution; apply log or log1p if confirmed.
 
 ---
 
-## 6. Naval propulsion — p=15 (ours) vs p=13 (paper), R² unaffected
+## 3. Crime — EM and Fix swap roles at d=2
 
-**Current notebook:** p=15, d=1 R²=0.84 (compressor), 0.91 (turbine)
-**Paper Table 2:** p=13, R²=0.84, 0.91
+| | n | p | p\* (d=2) | p\* (d=3) | R² EM (d=1) | R² Fix (d=1) | R² EM (d=2) | R² Fix (d=2) | R² EM (d=3) | R² Fix (d=3) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| New notebook | 1395 | 99 | 5049 | 17652 | 0.66 | **0.66** | **0.66** | **−0.80** | 0.66 | −0.34 |
+| Paper Table 2 | 1395 | 99 | 5049 | 17652 | 0.67 | **−0.74** | **−0.89** | **0.16** | 0.66 | −6.22 |
 
-**Cause:** Our UCI source retains `Ts` and `Tp` (propeller torque variables). These are output variables not available at prediction time and should be excluded. However, dropping them reduces R² below the paper's reported values — the opposite of the expected effect. The mechanism is unclear: `Ts` and `Tp` are near-constant and add minimal signal, but their removal appears to affect regularisation in a way that slightly degrades predictions. The paper's p=13 also implies one additional zero-variance column was dropped that we do not consistently drop (T1 or P1, which are zero-variance in the full dataset but not always in every fold).
+At d=1 paper Fix=−0.74 while ours is 0.66 — fixed grid already fails in the paper. At d=2 (n:p=0.28) the paper's EM collapses to −0.89 while ours holds at 0.66. The paper's behaviour (EM failing when p>>n) is physically expected; our EM not failing is suspicious.
 
-**Status:** No fix applied. Dropping Ts/Tp cannot be recommended until the R² deterioration is explained. Open question for follow-up.
+**Candidate cause:** Our per-fold zero-variance column dropping likely removes many sparse interaction terms for crime, reducing effective p well below 5049. The paper may not drop zero-variance columns, leaving EM in the genuine p>>n regime where it fails. This is also consistent with d=1 Fix: if our effective p differs from the paper's, different lambda grids may be optimal.
+
+**Fix:** Investigate effective p for crime across folds; consider whether zero-variance dropping is too aggressive for sparse datasets.
 
 ---
 
-## Summary table
+## 4. Parkinsons — EM failure at d=3 less severe than paper
 
-| Dataset | Metric | Ours | Paper | Cause | Fix available |
+| | n | p | p\* (d=2) | p\* (d=3) | R² EM (d=1) | R² EM (d=2) | R² EM (d=3) | R² GLM (d=3) |
+|---|---|---|---|---|---|---|---|---|
+| New notebook (motor) | 4112 | 19 | 209 | 1539 | 0.15 | 0.24 | **−0.47** | 0.28 |
+| New notebook (total) | 4112 | 19 | 209 | 1539 | 0.17 | 0.24 | **−0.83** | 0.27 |
+| Paper Table 2 (motor) | 4112 | 19 | 208 | 1539 | 0.15 | 0.25 | **−1.09** | 0.04 |
+| Paper Table 2 (total) | 4112 | 19 | 209 | 1539 | 0.17 | 0.24 | **−1.38** | 0.00 |
+
+n and p match at d=1. d=2 is close (within rounding). At d=3 our EM is less negative (−0.47/−0.83 vs −1.09/−1.38) and our GLM does much better (0.28/0.27 vs 0.04/0.00). The p* matches, so this is not a feature count issue.
+
+**Candidate cause:** Different random split realisations at d=3 drive large variance in EM performance in this regime (n:p=2.67 at d=3). The paper's worse EM may result from splits where the n:p ratio is unfavourable. The large GLM discrepancy is harder to explain.
+
+**Status:** Open; no fix without reproducing the paper's exact random splits.
+
+---
+
+## 5. Forest — OHE vs numeric month/day
+
+| | n | p | p\* (d=2) | p\* (d=3) | R² EM (d=1) | R² Fix (d=1) | R² EM (d=2) | R² EM (d=3) |
+|---|---|---|---|---|---|---|---|---|
+| New notebook | 361 | **26.43** | excluded | excluded | **−0.05** | **−0.16** | — | — |
+| Paper Table 2 | 361 | **12** | **295** | **1984** | **−0.01** | **−0.01** | **−0.01** | **−0.08** |
+
+**Cause (p):** Our source treats `month` (12 categories) and `day` (7 categories) as strings → OHE adds 11+6=17 dummy columns → p≈26 vs paper p=12 (treating both as numeric). Legacy `forest.csv` stored `log1p(area)` as target (confirmed row-by-row match), explaining the small R² difference.
+
+**Cause (exclusion):** Forest is excluded from our d=2/d=3 due to SVD failure on OHE interaction columns. With p=12 (numeric month/day) this would not occur.
+
+**Fix:** Treat `month` and `day` as ordered numeric (1–12, 1–7) to match paper. Apply `log1p` to area target. This should also resolve the d=2/d=3 exclusion and restore p=12.
+
+---
+
+## 6. Student — Portuguese-only vs merged dataset
+
+| | n\_train | p | R² EM (d=1) | R² EM (d=2) | R² EM (d=3) |
 |---|---|---|---|---|---|
-| Yacht | d=1 R² (EM) | 0.63 | 0.97 | log transform missing | Yes — apply `log` |
-| Parkinsons | d=3 R² (EM, motor) | −0.47 | −1.09 | p=19 vs 26, source unknown | Needs investigation |
-| Parkinsons | d=3 R² (EM, total) | −0.83 | −1.38 | p=19 vs 26, source unknown | Needs investigation |
-| Student | d=1 n_train | 454 | 730 | Portuguese only vs merged | Yes — merge datasets |
-| Student | d=1 R² (EM) | 0.27 | 0.18 | Portuguese only vs merged | Yes — merge datasets |
-| Forest | d=1 R² (EM) | −0.05 | −0.01 | log1p transform missing | Yes — apply `log1p` |
-| Automobile | d=1 R² (EM) | 0.88 | 0.90 | log transform missing | Yes — apply `log` |
-| Naval | d=1 p | 15 | 13 | Ts/Tp retained | No — dropping hurts R² |
+| New notebook | **454** | 39 | **0.27** | **0.27** | **0.25** |
+| Paper Table 2 | **730** | 39 | **0.18** | **0.19** | **0.18** |
+
+**Cause:** Paper merged Portuguese (649) and Math (395) student datasets → 1044 rows, n_train=730. Our source (ucimlrepo) returns Portuguese only → n_train=454. G1 and G2 are correctly dropped in both. The homogeneous Portuguese sample inflates R² across all degrees.
+
+**Fix:** Merge both student datasets. Expected to restore n_train=730 and R²≈0.18 at all degrees.
+
+---
+
+## 7. Automobile — p discrepancy from OHE treatment
+
+| | n | p | p\* (d=2) | p\* (d=3) | R² EM (d=1) | R² EM (d=2) | R² EM (d=3) |
+|---|---|---|---|---|---|---|---|
+| New notebook | 111 | **50.06** | **1009** | **12105** | 0.88 | 0.88 | 0.87 |
+| Paper Table 2 | 111 | **25** | **1076** | **12924** | 0.90 | 0.90 | 0.88 |
+
+**Cause (p):** Paper p=25 vs our p≈50. The paper likely treated categorical columns as numeric rather than OHE-encoding them, halving the feature count. Interestingly, p* at d=2/d=3 are similar (1076 vs 1009, 12924 vs 12105) because the polynomial expansion of both converges toward similar counts after zero-variance dropping. Legacy `automobile.csv` stored `log(price)` as target (confirmed). R² differences are small.
+
+**Fix:** Treat automobile categorical features as numeric (or apply the same encoding as legacy). Apply `log` to price target.
+
+---
+
+## 8. Facebook — EM failure magnitude differs at d=3
+
+| | n | p | p\* (d=2) | p\* (d=3) | R² EM (d=2) | R² EM (d=3) |
+|---|---|---|---|---|---|---|
+| New notebook | **349** | **17** | 167 | 1087 | **−6.26** | **−29.85** |
+| Paper Table 2 | **346** | **15** | 167 | 1087 | **−5.09** | **−2.53** |
+
+d=1 is close (EM=0.90 ours vs 0.91 paper). p* at d=2/d=3 matches. At d=2 EM failure magnitude is similar; at d=3 ours is dramatically worse (−29.85 vs −2.53). Paper Fix at d=3 is −164; ours is −66,439 — both catastrophic but vastly different in magnitude.
+
+**Candidate cause:** Our source has 5 extra rows (349 vs 346) and 2 extra features (p=17 vs 15) at d=1. The paper excludes the `comment`, `like`, and `share` sub-components; our version also drops them but may have different residual columns. The extra features at d=1 expand more at d=3, pushing into a worse regime.
+
+**Status:** Minor discrepancy at d=1/d=2; large at d=3. Investigate which 2 features differ.
+
+---
+
+## 9. Naval propulsion — p discrepancy, R² unaffected
+
+| | n | p | p\* (d=2) | p\* (d=3) | R² EM (d=1, comp.) | R² EM (d=1, turb.) |
+|---|---|---|---|---|---|---|
+| New notebook | 8353 | **15** | **149** | **963** | 0.84 | 0.91 |
+| Paper Table 2 | 8353 | **13** | **104** | **559** | 0.84 | 0.91 |
+
+**Cause:** Our source retains `Ts` and `Tp` (propeller torque output variables). Dropping them reproduces paper p=13 but reduces R² below reported values. At d=2/d=3 both reach R²=1.00.
+
+**Status:** No fix applied; keeping Ts/Tp preserves R² at the cost of p discrepancy at all degrees.
+
+---
+
+## 10. Autompg — minor n and p discrepancy
+
+| | n | p | R² EM (d=1) |
+|---|---|---|---|
+| New notebook | **274** | **7** | 0.81 |
+| Paper Table 2 | **278** | **8** | 0.81 |
+
+Paper has 4 more rows (different NaN handling) and 1 extra feature. R² matches. Cause and fix TBD; low priority given identical R².
+
+---
+
+## Summary
+
+| Dataset | Most severe discrepancy | Likely cause | Fix available |
+|---|---|---|---|
+| Yacht | R² 0.63 vs 0.97 (d=1) | log target transform | Yes |
+| Abalone | R² −0.66 vs 0.28 (d=3) | Possible log transform; unconfirmed | Needs verification |
+| Crime | EM 0.66 vs −0.89 (d=2) | Zero-variance dropping reduces effective p | Needs investigation |
+| Parkinsons | EM −0.47 vs −1.09 (d=3) | Random split variance; GLM gap unexplained | Needs investigation |
+| Forest | p=26 vs 12; excluded from d≥2 | OHE vs numeric month/day; log1p missing | Yes |
+| Student | n=454 vs 730; R² 0.27 vs 0.18 | Portuguese-only vs merged | Yes |
+| Automobile | p=50 vs 25 (OHE); log missing | OHE treatment + log target | Yes |
+| Facebook | EM −29.85 vs −2.53 (d=3) | 2 extra features cascade at d=3 | Partial |
+| Naval | p=15 vs 13 | Ts/Tp retained | No (dropping hurts R²) |
+| Autompg | n=274 vs 278; p=7 vs 8 | NaN/feature handling | TBD |
