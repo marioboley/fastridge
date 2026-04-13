@@ -266,12 +266,11 @@ DATASETS = {
             header=None, names=[f'V{i}' for i in range(1, 282)]
         ),
     ]},
-    # ct_slices CDN returns 403 programmatically; internal ZIP filename unverified.
     'ct_slices': {'sources': [
         from_ucimlrepo(206),
         from_zip(
             'https://cdn.uci-ics-mlr-prod.aws.uci.edu/206/'
-            'relative%2Blocation%2Bct%2Bslices%2Bon%2Baxial%2Baxis.zip',
+            'relative%2Blocation%2Bof%2Bct%2Bslices%2Bon%2Baxial%2Baxis.zip',
             'slice_localization_data.csv'
         ),
     ]},
