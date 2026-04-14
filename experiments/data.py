@@ -212,7 +212,8 @@ def fetch_eye():
 from sklearn.datasets import load_diabetes  # noqa: E402
 
 DATASETS = {
-    'abalone':          {'sources': [from_ucimlrepo(1)]},
+    'abalone':          {'sources': [from_ucimlrepo(1)],
+                         'n': 4177, 'p': 9},
     'autompg':          {'sources': [
         from_ucimlrepo(9),
         from_zip(
@@ -226,12 +227,17 @@ DATASETS = {
         # sources are inconsistent and car_name should be dropped at source level.
         # Also: ucimlrepo has been unavailable frequently — review all ucimlrepo sources
         # and add CDN ZIP fallbacks where possible.
-    ]},
-    'automobile':       {'sources': [from_ucimlrepo(10)]},
-    'airfoil':          {'sources': [from_ucimlrepo(291)]},
-    'boston':           {'sources': [from_url('https://raw.githubusercontent.com/selva86/datasets/master/BostonHousing.csv')]},
-    'crime':            {'sources': [from_ucimlrepo(183)]},
-    'concrete':         {'sources': [from_ucimlrepo(165)]},
+    ],                   'n': 398, 'p': 9},
+    'automobile':       {'sources': [from_ucimlrepo(10)],
+                         'n': 205, 'p': 26},
+    'airfoil':          {'sources': [from_ucimlrepo(291)],
+                         'n': 1503, 'p': 6},
+    'boston':           {'sources': [from_url('https://raw.githubusercontent.com/selva86/datasets/master/BostonHousing.csv')],
+                         'n': 506, 'p': 14},
+    'crime':            {'sources': [from_ucimlrepo(183)],
+                         'n': 1994, 'p': 128},
+    'concrete':         {'sources': [from_ucimlrepo(165)],
+                         'n': 1030, 'p': 9},
     'naval_propulsion': {'sources': [
         from_ucimlrepo(316),
         from_zip(
@@ -243,49 +249,58 @@ DATASETS = {
                    'P48', 'P1', 'P2', 'Pexh', 'TIC', 'mf',
                    'GT_compressor_decay', 'GT_turbine_decay'],
         ),
-    ]},
-    'diabetes':         {'sources': [from_sklearn(load_diabetes)]},
-    'eye':              {'sources': [fetch_eye]},
-    'facebook':         {'sources': [from_ucimlrepo(368)]},
-    'forest':           {'sources': [from_ucimlrepo(162)]},
-    'parkinsons':       {'sources': [from_ucimlrepo(189)]},
-    'real_estate':      {'sources': [from_ucimlrepo(477)]},
-    'student':          {'sources': [from_ucimlrepo(320)]},  # Portuguese only; see docs/superpowers/issues/2026-04-11-student-dataset-structure.md
+    ],                   'n': 11934, 'p': 18},
+    'diabetes':         {'sources': [from_sklearn(load_diabetes)],
+                         'n': 442, 'p': 11},
+    'eye':              {'sources': [fetch_eye],
+                         'n': 120, 'p': 201},
+    'facebook':         {'sources': [from_ucimlrepo(368)],
+                         'n': 500, 'p': 19},
+    'forest':           {'sources': [from_ucimlrepo(162)],
+                         'n': 517, 'p': 13},
+    'parkinsons':       {'sources': [from_ucimlrepo(189)],
+                         'n': 5875, 'p': 21},
+    'real_estate':      {'sources': [from_ucimlrepo(477)],
+                         'n': 414, 'p': 7},
+    'student':          {'sources': [from_ucimlrepo(320)],  # Portuguese only; see docs/superpowers/issues/2026-04-11-student-dataset-structure.md
+                         'n': 649, 'p': 33},
     'yacht':            {'sources': [from_url('https://archive.ics.uci.edu/ml/machine-learning-databases/00243/yacht_hydrodynamics.data',
                                               sep=r'\s+', header=None,
                                               names=['Longitudinal_position', 'Prismatic_coefficient',
                                                      'Length_displacement_ratio', 'Beam_draught_ratio',
                                                      'Length_beam_ratio', 'Froude_number',
-                                                     'Residuary_resistance'])]},
-    'ribo':             {'sources': [fetch_riboflavin]},
-    'blog':      {'sources': [
+                                                     'Residuary_resistance'])],
+                         'n': 308, 'p': 7},
+    'ribo':             {'sources': [fetch_riboflavin],
+                         'n': 71, 'p': 4089},
+    'blog':             {'sources': [
         from_ucimlrepo(304),
         from_zip(                                                    # CDN fallback (train split only)
             'https://cdn.uci-ics-mlr-prod.aws.uci.edu/304/blogfeedback.zip',
             'blogData_train.csv',
             header=None, names=[f'V{i}' for i in range(1, 282)]
         ),
-    ]},
-    'ct_slices': {'sources': [
+    ],                   'n': 52397, 'p': 281},
+    'ct_slices':        {'sources': [
         from_ucimlrepo(206),
         from_zip(
             'https://cdn.uci-ics-mlr-prod.aws.uci.edu/206/'
             'relative%2Blocation%2Bof%2Bct%2Bslices%2Bon%2Baxial%2Baxis.zip',
             'slice_localization_data.csv'
         ),
-    ]},
-    'tomshw':    {'sources': [from_zip_tar(
+    ],                   'n': 53500, 'p': 386},
+    'tomshw':           {'sources': [from_zip_tar(
         'https://cdn.uci-ics-mlr-prod.aws.uci.edu/248/buzz%2Bin%2Bsocial%2Bmedia.zip',
         'regression.tar.gz',
         './regression/TomsHardware/TomsHardware.data',
         header=None, names=[f'V{i}' for i in range(1, 98)]
-    )]},
-    'twitter':   {'sources': [from_zip_tar(
+    )],                  'n': 28179, 'p': 97},
+    'twitter':          {'sources': [from_zip_tar(
         'https://cdn.uci-ics-mlr-prod.aws.uci.edu/248/buzz%2Bin%2Bsocial%2Bmedia.zip',
         'regression.tar.gz',
         './regression/Twitter/Twitter.data',
         header=None, names=[f'V{i}' for i in range(1, 79)]
-    )]},
+    )],                  'n': 583250, 'p': 78},
     'crop':             {'sources': []},  # URL TBD
     'elec_devices':     {'sources': []},  # URL TBD
     'starlight':        {'sources': []},  # URL TBD
@@ -336,4 +351,14 @@ def get_dataset(name):
                 + (f" Last error: {last_exc}" if last_exc else " No sources configured.")
             )
 
-    return pd.read_csv(cache_path, na_values=_EXTRA_NA_VALUES)
+    df = pd.read_csv(cache_path, na_values=_EXTRA_NA_VALUES)
+    meta = DATASETS[name]
+    if 'n' in meta and df.shape[0] != meta['n']:
+        warnings.warn(
+            f"Dataset '{name}': expected n={meta['n']}, got {df.shape[0]}."
+        )
+    if 'p' in meta and df.shape[1] != meta['p']:
+        warnings.warn(
+            f"Dataset '{name}': expected p={meta['p']}, got {df.shape[1]}."
+        )
+    return df
