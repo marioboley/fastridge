@@ -37,18 +37,61 @@ from data import get_dataset
 
 
 class EmpiricalDataProblem:
+    """A prediction problem defined by a dataset and a target variable.
 
-    def __init__(self, dataset, target, drop=None, nan_policy=None):
+    Optionally, can also define pre-processing steps of column dropping,
+    missing value handling, and column transformations (applied in this
+    order).
+
+    Parameters
+    ----------
+    dataset : str
+        Name of the dataset as registered in data.DATASETS.
+    target : str
+        Name of the target column.
+    drop : list of str, optional
+        Column names to drop before returning X. Columns absent from the
+        dataset are skipped with a warning.
+    nan_policy : {'drop_rows', 'drop_cols'} or None, optional
+        How to handle remaining NaN values after dropping rows where the
+        target is NaN. 'drop_rows' drops any row with a NaN; 'drop_cols'
+        drops any column with a NaN. None (default) leaves NaNs in place.
+    transforms : list of (str, callable) pairs, optional
+        Ordered sequence of column transforms applied after NaN handling.
+        Each pair ``(column_name, fn)`` applies ``fn`` to the named column
+        in-place; ``fn`` must map a ``pd.Series`` to a ``pd.Series`` of the
+        same length (numpy ufuncs satisfy this). Raises ``ValueError`` if a
+        named column is absent from the DataFrame at transform time.
+
+    >>> import numpy as np
+    >>> diabetes = EmpiricalDataProblem('diabetes', 'target')
+    >>> X, y = diabetes.get_X_y()
+    >>> X.shape
+    (442, 10)
+    >>> diabetes_log = EmpiricalDataProblem('diabetes', 'target',
+    ...                                     transforms=[('target', np.log)])
+    >>> X_log, y_log = diabetes_log.get_X_y()
+    >>> np.allclose(y_log.values, np.log(y.values))
+    True
+    >>> diabetes_bad = EmpiricalDataProblem('diabetes', 'target',
+    ...                              transforms=[('nonexistent', np.log)])
+    >>> diabetes_bad.get_X_y()
+    Traceback (most recent call last):
+        ...
+    ValueError: Column 'nonexistent' not found in dataset 'diabetes' at transform time.
+    """
+
+    def __init__(self, dataset, target, drop=None, nan_policy=None, transforms=None):
         self.dataset = dataset
         self.target = target
         self.drop = drop or []
         self.nan_policy = nan_policy
+        self.transforms = transforms or []
 
     def get_X_y(self):
         df = get_dataset(self.dataset)
         missing = [c for c in self.drop if c not in df.columns]
         if missing:
-            # warn rather than error — drop list may include columns absent in some sources
             warnings.warn(f"Columns not found in '{self.dataset}', skipping drop: {missing}")
         df = df.drop(columns=[c for c in self.drop if c in df.columns])
         df = df.dropna(subset=[self.target])
@@ -57,6 +100,12 @@ class EmpiricalDataProblem:
         elif self.nan_policy == 'drop_cols':
             df = df.dropna(axis=1)
         df = df.reset_index(drop=True)
+        for col, fn in self.transforms:
+            if col not in df.columns:
+                raise ValueError(
+                    f"Column '{col}' not found in dataset '{self.dataset}' at transform time."
+                )
+            df[col] = fn(df[col])
         return df.drop(columns=[self.target]), df[self.target]
 
 
