@@ -93,7 +93,3 @@ print()
 ## Files
 
 - Create: `experiments/real_data_neurips2023.ipynb`
-
-## CI
-
-The notebook is added to `pytest.ini` `addopts` under `--nbmake` so CI runs it with `skip-execution` cells skipped, same as existing notebooks.
