@@ -1,32 +1,5 @@
 """
 Problem classes for simulated and empirical data experiments.
-
->>> p = EmpiricalDataProblem('diabetes', 'target')
->>> X, y = p.get_X_y()
->>> X.shape
-(442, 10)
->>> p_drop = EmpiricalDataProblem('yacht', 'Residuary_resistance', drop=[])
->>> X2, y2 = p_drop.get_X_y()
->>> X2.shape
-(308, 6)
->>> p_auto = EmpiricalDataProblem('automobile', 'price')
->>> X_auto, y_auto = p_auto.get_X_y()
->>> X_auto.shape[0]
-201
->>> list(X_auto.index) == list(y_auto.index) == list(range(201))
-True
->>> p_auto_drop = EmpiricalDataProblem('automobile', 'price', nan_policy='drop_rows')
->>> X_auto_drop, y_auto_drop = p_auto_drop.get_X_y()
->>> X_auto_drop.shape[0]
-159
->>> list(X_auto_drop.index) == list(y_auto_drop.index) == list(range(159))
-True
->>> p_auto_cols = EmpiricalDataProblem('automobile', 'price', nan_policy='drop_cols')
->>> X_auto_cols, y_auto_cols = p_auto_cols.get_X_y()
->>> X_auto_cols.shape
-(201, 19)
->>> list(X_auto_cols.index) == list(y_auto_cols.index) == list(range(201))
-True
 """
 import warnings
 
@@ -63,19 +36,59 @@ class EmpiricalDataProblem:
         same length (numpy ufuncs satisfy this). Raises ``ValueError`` if a
         named column is absent from the DataFrame at transform time.
 
-    >>> import numpy as np
+    Examples
+    --------
+    Basic usage:
+
     >>> diabetes = EmpiricalDataProblem('diabetes', 'target')
     >>> X, y = diabetes.get_X_y()
     >>> X.shape
     (442, 10)
+    >>> yacht = EmpiricalDataProblem('yacht', 'Residuary_resistance')
+    >>> X, y = yacht.get_X_y()
+    >>> X.shape
+    (308, 6)
+    >>> automobile = EmpiricalDataProblem('automobile', 'price')
+    >>> X, y = automobile.get_X_y()
+    >>> X.shape[0]
+    201
+    >>> list(X.index) == list(y.index) == list(range(201))
+    True
+
+    Dropping columns:
+
+    >>> yacht_no_froude = EmpiricalDataProblem('yacht', 'Residuary_resistance',
+    ...                                        drop=['Froude_number'])
+    >>> X, y = yacht_no_froude.get_X_y()
+    >>> X.shape
+    (308, 5)
+
+    NaN handling — drop rows or columns (index is always reset and aligned):
+
+    >>> auto = EmpiricalDataProblem('automobile', 'price', nan_policy='drop_rows')
+    >>> X, y = auto.get_X_y()
+    >>> X.shape[0]
+    159
+    >>> list(X.index) == list(y.index) == list(range(159))
+    True
+    >>> auto_cols = EmpiricalDataProblem('automobile', 'price', nan_policy='drop_cols')
+    >>> X, y = auto_cols.get_X_y()
+    >>> X.shape
+    (201, 19)
+    >>> list(X.index) == list(y.index) == list(range(201))
+    True
+
+    Column transforms:
+
+    >>> import numpy as np
     >>> diabetes_log = EmpiricalDataProblem('diabetes', 'target',
     ...                                     transforms=[('target', np.log)])
-    >>> X_log, y_log = diabetes_log.get_X_y()
-    >>> np.allclose(y_log.values, np.log(y.values))
+    >>> X, y_log = diabetes_log.get_X_y()
+    >>> X_base, y_base = diabetes.get_X_y()
+    >>> np.allclose(y_log.values, np.log(y_base.values))
     True
-    >>> diabetes_bad = EmpiricalDataProblem('diabetes', 'target',
-    ...                              transforms=[('nonexistent', np.log)])
-    >>> diabetes_bad.get_X_y()
+    >>> EmpiricalDataProblem('diabetes', 'target',
+    ...     transforms=[('nonexistent', np.log)]).get_X_y()
     Traceback (most recent call last):
         ...
     ValueError: Column 'nonexistent' not found in dataset 'diabetes' at transform time.
