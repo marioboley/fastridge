@@ -36,9 +36,9 @@ get_dataset() → drop columns → dropna(target) → nan_policy → apply trans
 
 - Modify: `experiments/problems.py` — add `transforms` parameter, apply in `get_X_y()`
 
-## Testing
+## Documentation and testing
 
-Add doctests to `problems.py` verifying:
+`EmpiricalDataProblem` now has enough parameters to warrant a class docstring documenting all of them (`dataset`, `target`, `drop`, `nan_policy`, `transforms`). Doctests live in the class or `get_X_y()` docstring — not only at module level — and verify:
 - `transforms=[]` (default) produces identical output to no `transforms` argument
 - `transforms=[('target', np.log)]` on the diabetes dataset (target column is literally named `'target'`) produces `log`-transformed y values
 - A misspelled column name raises `ValueError`
