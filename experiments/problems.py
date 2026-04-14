@@ -92,14 +92,41 @@ class EmpiricalDataProblem:
     Traceback (most recent call last):
         ...
     ValueError: Column 'nonexistent' not found in dataset 'diabetes' at transform time.
+
+    Value-object identity (hash and equality based on full definition):
+
+    >>> p1 = EmpiricalDataProblem('diabetes', 'target')
+    >>> p2 = EmpiricalDataProblem('diabetes', 'target')
+    >>> p1 == p2
+    True
+    >>> p1 is p2
+    False
+    >>> len(frozenset({p1, p2}))
+    1
+    >>> p3 = EmpiricalDataProblem('yacht', 'Residuary_resistance')
+    >>> len(frozenset({p1, p2, p3}))
+    2
+    >>> EmpiricalDataProblem('diabetes', 'target').drop
+    ()
+    >>> EmpiricalDataProblem('diabetes', 'target', drop=['bmi']).drop
+    ('bmi',)
     """
 
     def __init__(self, dataset, target, drop=None, nan_policy=None, transforms=None):
         self.dataset = dataset
         self.target = target
-        self.drop = drop or []
+        self.drop = tuple(drop or [])
         self.nan_policy = nan_policy
-        self.transforms = transforms or []
+        self.transforms = tuple(transforms or [])
+
+    def __eq__(self, other):
+        if not isinstance(other, EmpiricalDataProblem):
+            return NotImplemented
+        return (self.dataset, self.target, self.drop, self.nan_policy, self.transforms) == \
+               (other.dataset, other.target, other.drop, other.nan_policy, other.transforms)
+
+    def __hash__(self):
+        return hash((self.dataset, self.target, self.drop, self.nan_policy, self.transforms))
 
     def get_X_y(self):
         df = get_dataset(self.dataset)
