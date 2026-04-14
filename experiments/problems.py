@@ -6,7 +6,7 @@ import warnings
 import numpy as np
 from scipy.stats import wishart, multivariate_normal, uniform
 
-from data import get_dataset
+from data import get_dataset, DATASETS
 
 
 class EmpiricalDataProblem:
@@ -224,3 +224,56 @@ def random_problem(p, r=None, sigma_beta=1.0, sigma_eps=0.5, rng=None):
     x_dist = multivariate_normal(x_mu, x_cov)
     beta = random_sparse_vector(p, r, sigma_beta, rng=rng)
     return linear_problem(beta, sigma_eps, x_dist)
+
+
+NEURIPS2023 = frozenset({
+    EmpiricalDataProblem('abalone',          'Rings'),
+    EmpiricalDataProblem('airfoil',          'scaled-sound-pressure'),
+    EmpiricalDataProblem('automobile',       'price',
+                         nan_policy='drop_rows',
+                         transforms=[('price', np.log)]),
+    EmpiricalDataProblem('autompg',          'mpg',
+                         drop=['car_name'], nan_policy='drop_rows'),
+    EmpiricalDataProblem('blog',             'V281'),
+    EmpiricalDataProblem('boston',           'medv'),
+    EmpiricalDataProblem('concrete',         'Concrete compressive strength'),
+    EmpiricalDataProblem('crime',            'ViolentCrimesPerPop',
+                         drop=['state', 'fold', 'communityname'],
+                         nan_policy='drop_cols'),
+    EmpiricalDataProblem('ct_slices',        'reference'),
+    EmpiricalDataProblem('diabetes',         'target'),
+    EmpiricalDataProblem('eye',              'y'),
+    EmpiricalDataProblem('facebook',         'Total Interactions',
+                         drop=['comment', 'like', 'share'],
+                         nan_policy='drop_rows'),
+    EmpiricalDataProblem('forest',           'area',
+                         transforms=[('area', np.log1p)]),
+    EmpiricalDataProblem('naval_propulsion', 'GT_compressor_decay',
+                         drop=['GT_turbine_decay']),
+    EmpiricalDataProblem('naval_propulsion', 'GT_turbine_decay',
+                         drop=['GT_compressor_decay']),
+    EmpiricalDataProblem('parkinsons',       'motor_UPDRS',
+                         drop=['total_UPDRS']),
+    EmpiricalDataProblem('parkinsons',       'total_UPDRS',
+                         drop=['motor_UPDRS']),
+    EmpiricalDataProblem('real_estate',      'Y house price of unit area'),
+    EmpiricalDataProblem('ribo',             'y'),
+    EmpiricalDataProblem('student',          'G3',
+                         drop=['G1', 'G2']),
+    EmpiricalDataProblem('tomshw',           'V97'),
+    EmpiricalDataProblem('twitter',          'V78'),
+    EmpiricalDataProblem('yacht',            'Residuary_resistance',
+                         transforms=[('Residuary_resistance', np.log)]),
+})
+
+NEURIPS2023_D2 = frozenset(
+    p for p in NEURIPS2023
+    if 'n' in DATASETS[p.dataset]
+    and DATASETS[p.dataset]['p'] < 1000
+)
+
+NEURIPS2023_D3 = frozenset(
+    p for p in NEURIPS2023_D2
+    if DATASETS[p.dataset]['p'] < 150
+    and DATASETS[p.dataset]['n'] < 20000
+)
