@@ -4,6 +4,8 @@ Comparison of `experiments/real_data.ipynb` (full-experiment cells, seed=123, n_
 
 Table 2 column definitions: n and p are post-preprocessing (after NaN removal, OHE, zero-variance dropping), before polynomial expansion. p* is features after polynomial expansion. T is the speed-up ratio t_CV / t_EM.
 
+**Critical systemic difference:** The legacy notebook used `RidgeEM(squareU=False)`. Inspection of the legacy `fastridge.py` confirms that `squareU` was renamed to `t2` in the current API, with the same formula: `squareU=False` ↔ `t2=False` (half-Cauchy prior on τ) and `squareU=True` ↔ `t2=True` (Beta Prime prior on τ²). The current notebook uses `RidgeEM()` with default `t2=True`, which is a different EM variant from the one used in the paper. This is the primary suspected cause of the EM discrepancies at d=2 and d=3 across multiple datasets. Confirming requires re-running the full experiment with `RidgeEM(t2=False)`.
+
 ---
 
 ## 1. Yacht — log transform missing
