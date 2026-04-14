@@ -6,9 +6,9 @@ Make `EmpiricalDataProblem` a hashable value object and introduce named `frozens
 
 ```python
 from data import DATASETS
-NEURIPS2023_D2 = frozenset(
-    p for p in NEURIPS2023
-    if DATASETS[p.dataset]['n'] / DATASETS[p.dataset]['p']**2 > 1
+NEURIPS2023_D3 = frozenset(
+    p for p in NEURIPS2023_D2
+    if DATASETS[p.dataset]['p'] < 150 and DATASETS[p.dataset]['n'] < 20000
 )
 ```
 
@@ -68,14 +68,29 @@ NEURIPS2023 = frozenset({
 })
 ```
 
-Subsets via set expressions or generator filters on `DATASETS` metadata:
+Subsets are defined by filtering on `DATASETS` metadata. Datasets without `'n'`/`'p'` entries (crop, elec_devices, starlight — no source yet) are naturally excluded. `NEURIPS2023_D2` additionally excludes ribo (p=4089); `NEURIPS2023_D3` additionally excludes eye (p=201) and four large-n datasets (blog, ct_slices, tomshw, twitter):
 
 ```python
 from data import DATASETS
+
+NEURIPS2023_D2 = frozenset(
+    p for p in NEURIPS2023
+    if 'n' in DATASETS[p.dataset]
+    and DATASETS[p.dataset]['p'] < 1000
+)
+NEURIPS2023_D3 = frozenset(
+    p for p in NEURIPS2023_D2
+    if DATASETS[p.dataset]['p'] < 150
+    and DATASETS[p.dataset]['n'] < 20000
+)
+```
+
+Threshold values (1000, 150, 20000) are calibrated against the populated registry during implementation. Ad-hoc subsets follow the same pattern:
+
+```python
 NEURIPS2023_SMALL = frozenset(
     p for p in NEURIPS2023 if DATASETS[p.dataset]['n'] < 1000
 )
-NEURIPS2023_D2 = NEURIPS2023 - {EmpiricalDataProblem('forest', 'area', ...)}
 ```
 
 Future collections defined independently — identical `EmpiricalDataProblem` instances (same definition → same hash) deduplicate automatically on `|`:
