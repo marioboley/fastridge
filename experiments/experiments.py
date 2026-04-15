@@ -1,4 +1,5 @@
 import time
+import warnings
 import numpy as np
 import pandas as pd
 from sklearn.base import clone
@@ -109,15 +110,82 @@ class FittingTime:
         return r'$T_\mathrm{fit}$ [s]'
 
 
+class PredictionR2:
+    """Computes R² between predictions and test targets.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from sklearn.linear_model import Ridge
+    >>> X = np.arange(10).reshape(-1, 1).astype(float)
+    >>> y = np.arange(10).astype(float)
+    >>> est = Ridge(alpha=0.0001).fit(X, y)
+    >>> round(float(prediction_r2(est, None, X, y)), 4)
+    1.0
+    """
+
+    @staticmethod
+    def __call__(est, prob, x, y):
+        return r2_score(y, est.predict(x))
+
+    @staticmethod
+    def __str__():
+        return 'prediction_r2'
+
+    @staticmethod
+    def symbol():
+        return r'$R^2$'
+
+
+class NumberOfFeatures:
+    """Returns the number of features used by the estimator (len of coef_).
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from sklearn.linear_model import Ridge
+    >>> X = np.arange(10).reshape(-1, 1).astype(float)
+    >>> y = np.arange(10).astype(float)
+    >>> est = Ridge(alpha=0.0001).fit(X, y)
+    >>> number_of_features(est, None, X, y)
+    1
+    """
+
+    @staticmethod
+    def __call__(est, prob, x, y):
+        if hasattr(est, 'coef_'):
+            return len(est.coef_)
+        return float('nan')
+
+    @staticmethod
+    def __str__():
+        return 'number_of_features'
+
+    @staticmethod
+    def symbol():
+        return r'$p$'
+
+
 parameter_mean_squared_error = ParameterMeanSquaredError()
 prediction_mean_squared_error = PredictionMeanSquaredError()
 regularization_parameter = RegularizationParameter()
 number_of_iterations = NumberOfIterations()
 variance_abs_error = VarianceAbsoluteError()
 fitting_time = FittingTime()
+prediction_r2 = PredictionR2()
+number_of_features = NumberOfFeatures()
 
 default_stats = [parameter_mean_squared_error, prediction_mean_squared_error,
                  regularization_parameter, number_of_iterations, fitting_time]
+
+empirical_default_stats = [
+    prediction_mean_squared_error,
+    prediction_r2,
+    regularization_parameter,
+    number_of_iterations,
+    fitting_time,
+    number_of_features,
+]
 
 
 class Experiment:
@@ -314,3 +382,142 @@ def run_real_data_experiments(problems, estimators={}, n_iterations=100,
             print()
 
     return results
+
+
+class EmpiricalDataExperiment:
+    """Run repeated train/test experiments on a list of EmpiricalDataProblem instances.
+
+    Stores per-run results as numpy arrays of shape
+    ``(n_iterations, n_problems, 1, n_estimators)`` per metric, matching the
+    array layout of ``Experiment``. Failed runs (exception during fit) are
+    recorded as NaN and trigger a ``warnings.warn``. The seed is reset before
+    each problem's iteration loop, replicating the exact behaviour of the
+    legacy ``run_real_data_experiments`` function so that each problem gets the
+    same deterministic split sequence regardless of list ordering.
+
+    Parameters
+    ----------
+    problems : list of EmpiricalDataProblem
+    estimators : list of estimator objects
+    n_iterations : int
+    test_prop : float, default 0.3
+    seed : int or None
+    polynomial : int or None
+        If given, applies ``PolynomialFeatures(degree=polynomial)`` after OHE.
+    stats : list of metric callables or None
+        Each callable has signature ``(est, prob, x, y)``. Defaults to
+        ``empirical_default_stats``.
+    est_names : list of str or None
+        Defaults to ``[str(e) for e in estimators]``.
+    verbose : bool, default True
+
+    Examples
+    --------
+    >>> from fastridge import RidgeEM
+    >>> from problems import EmpiricalDataProblem
+    >>> prob = EmpiricalDataProblem('diabetes', 'target')
+    >>> exp = EmpiricalDataExperiment(
+    ...     [prob], [RidgeEM()], n_iterations=2, seed=1, verbose=False)
+    >>> exp.run().prediction_r2_.shape
+    (2, 1, 1, 1)
+    >>> exp.ns.shape
+    (1, 1)
+    >>> int(exp.ns[0, 0]) > 0
+    True
+    """
+
+    def __init__(self, problems, estimators, n_iterations, test_prop=0.3,
+                 seed=None, polynomial=None, stats=None, est_names=None,
+                 verbose=True):
+        self.problems = problems
+        self.estimators = estimators
+        self.n_iterations = n_iterations
+        self.test_prop = test_prop
+        self.seed = seed
+        self.polynomial = polynomial
+        self.stats = empirical_default_stats if stats is None else stats
+        self.est_names = [str(e) for e in estimators] if est_names is None else est_names
+        self.verbose = verbose
+
+    def run(self):
+        n_problems = len(self.problems)
+        n_estimators = len(self.estimators)
+
+        for stat in self.stats:
+            self.__dict__[str(stat) + '_'] = np.full(
+                (self.n_iterations, n_problems, 1, n_estimators), np.nan)
+        self.ns = np.zeros((n_problems, 1), dtype=int)
+
+        for prob_idx, problem in enumerate(self.problems):
+            X, y = problem.get_X_y()
+
+            if self.verbose:
+                print(problem.dataset, end=' ')
+
+            categorical_cols = [col for col in X.columns
+                                if not pd.api.types.is_numeric_dtype(X[col])]
+            if categorical_cols:
+                encoder = OneHotEncoder(drop='first', sparse_output=False)
+                encoded = encoder.fit_transform(X[categorical_cols])
+                X = pd.concat([
+                    X.drop(categorical_cols, axis=1),
+                    pd.DataFrame(encoded,
+                                 columns=encoder.get_feature_names_out(categorical_cols))
+                ], axis=1)
+
+            if self.polynomial is not None:
+                poly = PolynomialFeatures(degree=self.polynomial, include_bias=False)
+                X_poly = poly.fit_transform(X)
+                X_poly = pd.DataFrame(X_poly,
+                                      columns=poly.get_feature_names_out(X.columns))
+                npoly, ppoly = X_poly.shape
+                if npoly * ppoly > 35_000_000:
+                    X_poly = X_poly.drop(X.columns, axis=1)
+                    pnew = int(np.ceil(35_000_000 / npoly))
+                    X_poly = X_poly.iloc[
+                        :, np.random.choice(X_poly.shape[1], size=pnew, replace=False)]
+                    X = pd.concat([X, X_poly], axis=1)
+                else:
+                    X = X_poly
+
+            self.ns[prob_idx, 0] = int(X.shape[0] * (1 - self.test_prop))
+
+            if self.verbose:
+                print(f'(n={X.shape[0]}, p={X.shape[1]})', end='')
+
+            if self.seed is not None:
+                np.random.seed(self.seed)
+
+            for iter_idx in range(self.n_iterations):
+                if self.verbose:
+                    print('.', end='')
+
+                X_train, X_test, y_train, y_test = train_test_split(
+                    X, y, test_size=self.test_prop)
+
+                std = X_train.std()
+                non_zero = std[std != 0].index
+                X_train = X_train[non_zero]
+                X_test = X_test[non_zero]
+
+                for est_idx, est in enumerate(self.estimators):
+                    _est = clone(est, safe=False)
+                    try:
+                        t0 = time.time()
+                        _est.fit(X_train, y_train)
+                        _est.fitting_time_ = time.time() - t0
+                    except Exception as e:
+                        warnings.warn(
+                            f"Run {iter_idx} failed for '{self.est_names[est_idx]}'"
+                            f" on '{problem.dataset}': {e}")
+                        continue
+
+                    for stat in self.stats:
+                        self.__dict__[str(stat) + '_'][
+                            iter_idx, prob_idx, 0, est_idx] = stat(
+                                _est, problem, X_test, y_test)
+
+            if self.verbose:
+                print()
+
+        return self
