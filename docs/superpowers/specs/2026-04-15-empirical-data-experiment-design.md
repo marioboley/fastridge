@@ -52,7 +52,7 @@ EmpiricalDataExperiment(problems, estimators, n_iterations, test_prop=0.3,
 - `stats`: list of metric callables following the `(est, prob, x, y)` protocol.
 - `est_names`: defaults to `[str(est) for est in estimators]`.
 - `verbose`: prints progress to stdout (dataset name and dots per iteration).
-- `self.rng = np.random.default_rng(seed)`.
+- `self.seed = seed` stored for use inside `run()`.
 
 ### `run()` Method
 
@@ -61,14 +61,15 @@ EmpiricalDataExperiment(problems, estimators, n_iterations, test_prop=0.3,
 2. Detect categorical columns via `pd.api.types.is_numeric_dtype`; apply `OneHotEncoder(drop='first', sparse_output=False)`.
 3. If `polynomial` is not None, apply `PolynomialFeatures(degree=polynomial, include_bias=False)`. If the resulting matrix exceeds 35 000 000 elements, apply the existing size-cap logic (drop linear terms, randomly subsample interaction columns).
 4. Derive train size: `n_train = int(X.shape[0] * (1 - test_prop))`. Store in `self.ns` as shape `(n_problems, 1)` — one entry per problem, matching the `n_ns=1` structure.
+5. Reset global random state: `if self.seed is not None: np.random.seed(self.seed)`. This replicates the exact legacy behaviour of `run_real_data_experiments`, where the seed is reset for each problem so that each problem's iteration sequence is independent of others and reproducible.
 
 **Per-iteration loop:**
-5. `X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_prop, random_state=self.rng.integers(2**31))`.
-6. Drop zero-variance columns: compute `std = X_train.std(); non_zero = std[std != 0].index`; apply to both train and test.
-7. For each estimator:
+6. `X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_prop)` — no `random_state` argument, relying on global numpy state as in the legacy function.
+7. Drop zero-variance columns: compute `std = X_train.std(); non_zero = std[std != 0].index`; apply to both train and test.
+8. For each estimator:
    a. Clone: `_est = clone(est, safe=False)`.
    b. `t0 = time.time(); _est.fit(X_train, y_train); _est.fitting_time_ = time.time() - t0` — wrapped in `try/except Exception`.
-   c. On exception: write NaN to all stat arrays at `(iteration, problem_idx, 0, estimator_idx)`. Continue to next estimator.
+   c. On exception: issue `warnings.warn(f"Run {i} failed for estimator '{est_name}' on problem '{problem.dataset}': {e}")`. Write NaN to all stat arrays at `(iteration, problem_idx, 0, estimator_idx)`. Continue to next estimator.
    d. On success: call `stat(_est, problem, X_test, y_test)` for each stat and write the result.
 
 **Result storage:**
@@ -156,9 +157,9 @@ empirical_default_stats = [
 
 ---
 
-## Removed
+## Retained for Reference
 
-- `run_real_data_experiments` function: deleted from `experiments.py`.
+- `run_real_data_experiments` is kept in `experiments.py` unchanged. It is not called by any updated notebook but remains available for reference and comparison.
 
 ---
 
