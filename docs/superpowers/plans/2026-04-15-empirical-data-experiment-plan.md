@@ -315,7 +315,7 @@ Use the Read tool on `experiments/real_data.ipynb` before any NotebookEdit. Conf
 - cell id `e8c4ddaa` — d=2 table
 - cell id `094956a8` — d=3 run
 - cell id `59535500` — d=3 table
-- cell id `65e15066` — `make_figure3` definition (2nd, better version)
+- cell id `65e15066` — `make_figure3` definition (the old duplicate definition cell `38ec21c7` has been removed)
 - cell id `0fccfcde` — `make_figure3` call
 
 - [ ] **Step 2: Update cell `76d89b51` — imports + d=1 run**
@@ -562,14 +562,9 @@ Replace source with:
 make_figure3(exp, exp_d2, exp_d3)
 ```
 
-- [ ] **Step 10: Run the preview cells interactively in JupyterLab and get user approval**
+- [ ] **Step 10: User review checkpoint — do not proceed until approved**
 
-Open `experiments/real_data.ipynb` in JupyterLab (not VS Code — the extension causes write conflicts). Run cells 0–12 in order (all non-skip-execution). Check:
-- The d=1 table renders with sensible R² values (e.g. diabetes ≈ 0.49, concrete ≈ 0.89).
-- The d=2 and d=3 runs complete without crashing; warnings for any SVD failures are printed to the cell output.
-- `make_figure3(exp, exp_d2, exp_d3)` produces a 2×3 scatter plot that looks visually correct (points near the diagonal, colorbar present).
-
-**Stop and show the user the figure output. Do not proceed to Step 11 until the user approves the visual output.**
+The user will run the updated preview cells in JupyterLab themselves (not VS Code — extension causes write conflicts). Wait for the user to confirm the output looks correct before continuing to Step 11.
 
 - [ ] **Step 11: Run nbmake on `real_data.ipynb` to verify CI passes**
 
@@ -801,20 +796,29 @@ git commit -m "feat: update real_data.ipynb full-experiment cells to use Empiric
 
 **Files:** `experiments/real_data_neurips2023.ipynb`
 
-All cells in this notebook are skip-execution; this task is for consistency. The `stat_mean` helper and `make_figure2` must be updated with the same pattern used in `real_data.ipynb`.
+All cells in this notebook are skip-execution; this task is for consistency. The `stat_mean` helper and `make_figure3` must be updated with the same pattern used in `real_data.ipynb`.
 
 - [ ] **Step 1: Read `real_data_neurips2023.ipynb` to confirm cell IDs**
 
 Use the Read tool. Confirm:
+- cell id `a001` — markdown header (mentions "Figure 2" — needs fixing to "Figure 3")
 - cell id `a003` — imports + d=1 run
 - cell id `a004` — d=1 table
 - cell id `a006` — d=2 run
 - cell id `a007` — d=2 table
 - cell id `a009` — d=3 run
 - cell id `a010` — d=3 table
-- cell id `a013` — `make_figure2` definition + call
+- cell id `a013` — `make_figure3` definition + call
 
-- [ ] **Step 2: Update cell `a003` — imports + d=1 run**
+- [ ] **Step 2: Update cell `a001` — fix figure number in markdown header**
+
+Replace "Figure 2" with "Figure 3" in the markdown source of cell `a001`. The corrected first sentence should read:
+
+```
+Reproduces Table 2 and Figure 3 of the NeurIPS 2023 paper comparing:
+```
+
+- [ ] **Step 3: Update cell `a003` — imports + d=1 run**
 
 Replace source with:
 
@@ -839,7 +843,7 @@ exp_d1 = EmpiricalDataExperiment(
 print()
 ```
 
-- [ ] **Step 3: Update cell `a004` — d=1 table**
+- [ ] **Step 4: Update cell `a004` — d=1 table**
 
 Replace source with:
 
@@ -866,7 +870,7 @@ df_d1 = pd.DataFrame(rows_d1).sort_values('n_train').round(2)
 df_d1
 ```
 
-- [ ] **Step 4: Update cell `a006` — d=2 run**
+- [ ] **Step 5: Update cell `a006` — d=2 run**
 
 Replace source with:
 
@@ -881,7 +885,7 @@ exp_d2 = EmpiricalDataExperiment(
 print()
 ```
 
-- [ ] **Step 5: Update cell `a007` — d=2 table**
+- [ ] **Step 6: Update cell `a007` — d=2 table**
 
 Replace source with:
 
@@ -902,7 +906,7 @@ df_d2 = pd.DataFrame(rows_d2).sort_values('n_train').round(2)
 df_d2
 ```
 
-- [ ] **Step 6: Update cell `a009` — d=3 run**
+- [ ] **Step 7: Update cell `a009` — d=3 run**
 
 Replace source with:
 
@@ -917,7 +921,7 @@ exp_d3 = EmpiricalDataExperiment(
 print()
 ```
 
-- [ ] **Step 7: Update cell `a010` — d=3 table**
+- [ ] **Step 8: Update cell `a010` — d=3 table**
 
 Replace source with:
 
@@ -938,7 +942,7 @@ df_d3 = pd.DataFrame(rows_d3).sort_values('n_train').round(2)
 df_d3
 ```
 
-- [ ] **Step 8: Update cell `a013` — `make_figure2` definition + call**
+- [ ] **Step 9: Update cell `a013` — `make_figure3` definition + call**
 
 Replace source with:
 
@@ -946,7 +950,7 @@ Replace source with:
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
-def make_figure2(exp_d1, exp_d2, exp_d3, output_path=None):
+def make_figure3(exp_d1, exp_d2, exp_d3, output_path=None):
     """2x3 scatter of EM vs CV R² for d=1,2,3. Color = speed-up ratio.
 
     Top row: CV_glm on y-axis. Bottom row: CV_fix on y-axis.
@@ -1032,11 +1036,11 @@ def make_figure2(exp_d1, exp_d2, exp_d3, output_path=None):
     if output_path:
         fig.savefig(output_path, bbox_inches='tight')
 
-make_figure2(exp_d1, exp_d2, exp_d3,
-             output_path='../output/paper2023_figure2.pdf')
+make_figure3(exp_d1, exp_d2, exp_d3,
+             output_path='../output/paper2023_figure3.pdf')
 ```
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add experiments/real_data_neurips2023.ipynb
