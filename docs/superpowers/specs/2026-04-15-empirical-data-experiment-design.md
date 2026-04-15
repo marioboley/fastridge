@@ -167,7 +167,25 @@ empirical_default_stats = [
 
 `real_data.ipynb` and `real_data_neurips2023.ipynb` currently call `run_real_data_experiments(...)` and work with the list-of-aggregated-dicts result. Both are updated to use `EmpiricalDataExperiment(...).run()`.
 
-Result access in notebooks changes from `results[i]['EM']['r2']` (scalar mean) to `np.nanmean(exp.prediction_r2_[:, i, 0, j])` (mean over non-NaN iterations). Helper expressions for this are shown in the implementation plan.
+Result access in notebooks uses direct integer indices — matching the style of `Experiment` notebooks — with no helper function:
+
+```python
+np.nanmean(exp.prediction_r2_[:, i, 0, 0])   # EM (estimator index 0)
+np.nanmean(exp.fitting_time_[:, i, 0, 1])    # CV_fix (estimator index 1)
+```
+
+---
+
+## Future: Named Result Access
+
+A planned follow-on enhancement is to add a `nanmean` convenience method to both `EmpiricalDataExperiment` and `Experiment` as part of eventual unification. The method would accept each axis dimension as an integer index or a string name, and would cover the `n` axis too (relevant for `Experiment` which supports multiple n values per problem):
+
+```python
+exp.nanmean('fitting_time', est='EM', prob='diabetes', n=0)   # by name
+exp.nanmean('fitting_time', est=0,    prob=0,          n=0)   # by index
+```
+
+This is deferred until both classes are unified, so the API is designed once for both.
 
 ---
 
