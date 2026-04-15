@@ -562,7 +562,16 @@ Replace source with:
 make_figure3(exp, exp_d2, exp_d3)
 ```
 
-- [ ] **Step 10: Run nbmake on `real_data.ipynb` to verify CI passes**
+- [ ] **Step 10: Run the preview cells interactively in JupyterLab and get user approval**
+
+Open `experiments/real_data.ipynb` in JupyterLab (not VS Code — the extension causes write conflicts). Run cells 0–12 in order (all non-skip-execution). Check:
+- The d=1 table renders with sensible R² values (e.g. diabetes ≈ 0.49, concrete ≈ 0.89).
+- The d=2 and d=3 runs complete without crashing; warnings for any SVD failures are printed to the cell output.
+- `make_figure3(exp, exp_d2, exp_d3)` produces a 2×3 scatter plot that looks visually correct (points near the diagonal, colorbar present).
+
+**Stop and show the user the figure output. Do not proceed to Step 11 until the user approves the visual output.**
+
+- [ ] **Step 11: Run nbmake on `real_data.ipynb` to verify CI passes**
 
 ```bash
 cd /Users/marioboley/Documents/GitHub/fastridge && source .venv/bin/activate && pytest --nbmake experiments/real_data.ipynb -v 2>&1 | tail -20
@@ -570,7 +579,7 @@ cd /Users/marioboley/Documents/GitHub/fastridge && source .venv/bin/activate && 
 
 Expected: PASSED. The d=2 SVD failure (forest) is now handled gracefully and should emit a warning rather than crashing.
 
-- [ ] **Step 11: Commit**
+- [ ] **Step 12: Commit**
 
 ```bash
 git add experiments/real_data.ipynb
