@@ -344,8 +344,8 @@ problems = [
 
 estimators = {
     'EM':     RidgeEM(),
-    'CV_glm': RidgeLOOCV(alphas=100),
     'CV_fix': RidgeLOOCV(alphas=np.logspace(-10, 10, 100, endpoint=True, base=10)),
+    'CV_glm': RidgeLOOCV(alphas=100),
 }
 
 exp = EmpiricalDataExperiment(
@@ -596,8 +596,8 @@ Replace only the last three lines (the `estimators_full` definition and run call
 ```python
 estimators_full = {
     'EM':     RidgeEM(),
-    'CV_glm': RidgeLOOCV(alphas=100),
     'CV_fix': RidgeLOOCV(alphas=np.logspace(-10, 10, 100, endpoint=True, base=10)),
+    'CV_glm': RidgeLOOCV(alphas=100),
 }
 
 exp_full = EmpiricalDataExperiment(
@@ -831,8 +831,8 @@ from data import DATASETS
 
 estimators = {
     'EM':     RidgeEM(t2=False),
-    'CV_glm': RidgeLOOCV(alphas=100),
     'CV_fix': RidgeLOOCV(alphas=np.logspace(-10, 10, 100, base=10)),
+    'CV_glm': RidgeLOOCV(alphas=100),
 }
 
 problems_d1 = sorted(NEURIPS2023, key=lambda p: DATASETS[p.dataset]['n'])
@@ -866,7 +866,7 @@ for i, problem in enumerate(exp_d1.problems):
     row['n_train']        = int(exp_d1.ns[i, 0])
     row['n:p']            = int(exp_d1.ns[i, 0]) / stat_mean(exp_d1, 'number_of_features', 'EM', i)
     rows_d1.append(row)
-df_d1 = pd.DataFrame(rows_d1).sort_values('n_train').round(2)
+df_d1 = pd.DataFrame(rows_d1).sort_values('n_train', ascending=False).round(2)
 df_d1
 ```
 
@@ -902,7 +902,7 @@ for i, problem in enumerate(exp_d2.problems):
     row['n_train']        = int(exp_d2.ns[i, 0])
     row['n:p']            = int(exp_d2.ns[i, 0]) / stat_mean(exp_d2, 'number_of_features', 'EM', i)
     rows_d2.append(row)
-df_d2 = pd.DataFrame(rows_d2).sort_values('n_train').round(2)
+df_d2 = pd.DataFrame(rows_d2).sort_values('n_train', ascending=False).round(2)
 df_d2
 ```
 
@@ -938,7 +938,7 @@ for i, problem in enumerate(exp_d3.problems):
     row['n_train']        = int(exp_d3.ns[i, 0])
     row['n:p']            = int(exp_d3.ns[i, 0]) / stat_mean(exp_d3, 'number_of_features', 'EM', i)
     rows_d3.append(row)
-df_d3 = pd.DataFrame(rows_d3).sort_values('n_train').round(2)
+df_d3 = pd.DataFrame(rows_d3).sort_values('n_train', ascending=False).round(2)
 df_d3
 ```
 
