@@ -75,28 +75,28 @@ class RidgeEM:
             beta_old = beta
             beta = c / (s*s + 1/tau_square)
 
-            w = beta.dot(beta) + sigma_square*((1/(s*s+1/tau_square)).sum()+tau_square*max(p-n, 0))
+            ESN = beta.dot(beta) + sigma_square*((1/(s*s+1/tau_square)).sum()+tau_square*max(p-n, 0))
             
             RSS = y_sqnorm - 2*beta.dot(c)+(beta*beta).dot(s*s)
-            z = RSS + sigma_square*(s*s/(s*s + 1/tau_square)).sum()
+            ESS = RSS + sigma_square*(s*s/(s*s + 1/tau_square)).sum()
 
             if self.closed_form_m_step:
                 
                 if self.t2:
                     
                     #tau_square = ((((w**2)*(n**2)) + ((z**2)*(p**2)) + 2*w*z*(8 + 4*n + 4*p + n*p))**0.5 + w*n -z*p)/(2*z*(2+p)) ##half cauchy
-                    tau_square = (w*(-1+n) - z*(1+p) + (4*w*(n+1)*z*(3+p)+(w+z*(p+1)-w*n)**2)**0.5) / (2*z*(3+p))  ##beta prime         
-                    sigma_square = (z*tau_square + w) / ((n+p+2)*tau_square)
+                    tau_square = (ESN*(-1+n) - ESS*(1+p) + (4*ESN*(n+1)*ESS*(3+p)+(ESN+ESS*(p+1)-ESN*n)**2)**0.5) / (2*ESS*(3+p))  ##beta prime         
+                    sigma_square = (ESS*tau_square + ESN) / ((n+p+2)*tau_square)
                     
                 else:
                     
-                    tau_square = (w*(-1+n) - z*p + (4*w*(n+1)*z*(2+p)+(w+z*p-w*n)**2)**0.5) / (2*z*(2+p))      
-                    sigma_square = (z*tau_square + w) / ((n+p+1)*tau_square)
+                    tau_square = (ESN*(-1+n) - ESS*p + (4*ESN*(n+1)*ESS*(2+p)+(ESN+ESS*p-ESN*n)**2)**0.5) / (2*ESS*(2+p))      
+                    sigma_square = (ESS*tau_square + ESN) / ((n+p+1)*tau_square)
                     
                     
             else:
                 theta_init = np.array([tau_square, sigma_square])
-                opt_res = minimize(self.neg_q_function, x0=theta_init, args=(w, z, n, p), method='BFGS')
+                opt_res = minimize(self.neg_q_function, x0=theta_init, args=(ESN, ESS, n, p), method='BFGS')
                 theta = opt_res.x
                 tau_square, sigma_square = theta[0], theta[1]
             
