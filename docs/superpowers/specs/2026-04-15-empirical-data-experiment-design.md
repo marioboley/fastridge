@@ -64,13 +64,13 @@ EmpiricalDataExperiment(problems, estimators, n_iterations, test_prop=0.3,
 5. Reset global random state: `if self.seed is not None: np.random.seed(self.seed)`. This replicates the exact legacy behaviour of `run_real_data_experiments`, where the seed is reset for each problem so that each problem's iteration sequence is independent of others and reproducible.
 
 **Per-iteration loop:**
-6. `X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_prop)` — no `random_state` argument, relying on global numpy state as in the legacy function.
-7. Drop zero-variance columns: compute `std = X_train.std(); non_zero = std[std != 0].index`; apply to both train and test.
-8. For each estimator:
-   a. Clone: `_est = clone(est, safe=False)`.
-   b. `t0 = time.time(); _est.fit(X_train, y_train); _est.fitting_time_ = time.time() - t0` — wrapped in `try/except Exception`.
-   c. On exception: issue `warnings.warn(f"Run {i} failed for estimator '{est_name}' on problem '{problem.dataset}': {e}")`. Write NaN to all stat arrays at `(iteration, problem_idx, 0, estimator_idx)`. Continue to next estimator.
-   d. On success: call `stat(_est, problem, X_test, y_test)` for each stat and write the result.
+1. Split: `X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_prop)` — no `random_state` argument, relying on global numpy state as in the legacy function.
+2. Drop zero-variance columns: compute `std = X_train.std(); non_zero = std[std != 0].index`; apply to both train and test.
+3. For each estimator:
+   - Clone: `_est = clone(est, safe=False)`.
+   - Fit inside `try/except Exception`: `t0 = time.time(); _est.fit(X_train, y_train); _est.fitting_time_ = time.time() - t0`.
+   - On exception: issue `warnings.warn(f"Run {i} failed for '{est_name}' on '{problem.dataset}': {e}")`, write NaN to all stat arrays at `(iteration, problem_idx, 0, estimator_idx)`, continue to next estimator.
+   - On success: call each `stat(_est, problem, X_test, y_test)` and write the result into the corresponding array.
 
 **Result storage:**
 - Pre-allocate `self.__dict__[str(stat) + '_'] = np.full((n_iterations, n_problems, 1, n_estimators), np.nan)` for each stat before the loop (note: `Experiment` uses `np.zeros`; `EmpiricalDataExperiment` uses `np.nan` so that unrun cells are distinguishable from zero results).
