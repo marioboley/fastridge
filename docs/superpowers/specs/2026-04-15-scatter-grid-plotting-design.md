@@ -138,3 +138,15 @@ To save: `fig.savefig('../output/realdata_r2_by_degree.pdf', bbox_inches='tight'
 - Modify: `experiments/plotting.py` — add `scatter_clipped` and `grid_with_colourbar`
 - Modify: `experiments/real_data.ipynb` — replace `make_figure3` definition and calls with `grid_with_colourbar` + `scatter_clipped` pattern
 - Modify: `experiments/real_data_neurips2023.ipynb` — same replacement
+
+---
+
+## Future Possibilities
+
+`scatter_clipped` could be registered as a method on `matplotlib.axes.Axes` via monkey-patching at import time of `plotting.py`:
+
+```python
+matplotlib.axes.Axes.scatter_clipped = scatter_clipped
+```
+
+This would allow `axes[row, col].scatter_clipped(x, y, c, norm, cmap)` in notebook cells. Matplotlib has no formal extension mechanism for adding Axes methods (the projection registration system is for full coordinate-system replacements, not utility methods), so monkey-patching is the only realistic path. Downsides: IDEs cannot infer the method without explicit type stubs, the patch is invisible unless `plotting` is imported, and it mutates a third-party class globally. Left as a future option for when the readability benefit outweighs the implicitness cost.

@@ -53,6 +53,8 @@ Both classes follow the scikit-learn estimator API (`fit(X, y)` / `predict(X)`) 
 
 **Notebook tables:** Prefer returning a DataFrame as the last expression in a cell (pandas/notebook native rendering) over `tabulate` or `print`. No extra dependency, interactive in JupyterLab.
 
+**Notebook code style:** Aim for compact, declarative cells. A cell should express *what* is being computed or displayed, not walk through *how* step by step. Prefer list comprehensions and expressive function calls over explicit loops and intermediate variables. Heavy logic belongs in module functions, not inline in cells.
+
 ## Coding Conventions
 
 **Class names:** UpperCamelCase / PascalCase (Python standard — each word capitalised, no separators). `linear_problem` in `experiments/problems.py` is a legacy exception — do not replicate it; new classes use PascalCase.
