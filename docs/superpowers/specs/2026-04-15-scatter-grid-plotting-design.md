@@ -26,7 +26,10 @@ Problems with the current code:
 ### Function 1: `scatter_clipped`
 
 ```python
-def scatter_clipped(x, y, c, norm, cmap, clip_min=-0.1, ax=None):
+def scatter_clipped(x, y, c, norm, cmap,
+                    clip_min=-0.1, clip_max=1.0,
+                    ref_lines=(0.0,), pad=0.03,
+                    ax=None):
 ```
 
 Draws one scatter panel on `ax` (defaults to `plt.gca()`).
@@ -36,18 +39,19 @@ Draws one scatter panel on `ax` (defaults to `plt.gca()`).
 - `c`: 1D array-like of floats — colour values (e.g. speed-up ratios), same length as `x` and `y`
 - `norm`: a `matplotlib.colors.Normalize` instance — applied to `c` to get colours; must be pre-computed by the caller over all data in the grid so the colour scale is globally consistent
 - `cmap`: a matplotlib colormap
-- `clip_min`: float (default `-0.1`) — values below this are clipped to `clip_min` and drawn with dashed edges to signal they are out of range
+- `clip_min`: float (default `-0.1`) — values below this are clipped and drawn with dashed edges to signal they are out of range
+- `clip_max`: float (default `1.0`) — values above this are clipped and drawn with dashed edges
+- `ref_lines`: sequence of floats (default `(0.0,)`) — positions of grey horizontal and vertical reference lines (`color='0.8'`, `lw=0.5`)
+- `pad`: float (default `0.03`) — margin added beyond `[clip_min, clip_max]` on all sides; axis limits are set to `[clip_min - pad, clip_max + pad]`
 - `ax`: `matplotlib.axes.Axes` or `None` — defaults to `plt.gca()`
 
 **Behaviour:**
-- Points with `x >= clip_min` and `y >= clip_min` are drawn with solid edges (`linewidths=0.6`)
-- Points where either coordinate is below `clip_min` are clipped to `clip_min` and drawn with dashed edges (`linewidths=0.8`, `linestyle='--'`)
-- Draws a diagonal reference line from `(clip_min, clip_min)` to `(1, 1)` in black dashed style
-- Draws grey horizontal and vertical lines at 0 (`color='0.8'`, `lw=0.5`)
-- Sets axis limits to `[clip_min - 0.03, 1 + 0.03]` on both axes
+- Points where neither coordinate is clipped are drawn with solid edges (`linewidths=0.6`)
+- Points where either coordinate falls outside `[clip_min, clip_max]` are clipped to the nearest bound and drawn with dashed edges (`linewidths=0.8`, `linestyle='--'`)
+- Draws a diagonal reference line from `(clip_min - pad, clip_min - pad)` to `(clip_max + pad, clip_max + pad)` in black dashed style, so it reaches exactly to the corners of the axes
+- Draws grey horizontal and vertical lines at each position in `ref_lines`
+- Sets axis limits to `[clip_min - pad, clip_max + pad]` on both axes
 - Returns `ax`
-
-**Sets:** axis limits to `lim = [clip_min - pad, 1 + pad]` on both axes, where `pad = 0.03` is a module-level constant. The diagonal reference line is drawn to exactly `lim` on both ends so it reaches the corners of the axes (the current `make_figure3` has a bug where the line ends at `clip_min` and `1`, falling short by `pad` on each side).
 
 **Does not set:** axis labels, ticks, titles, or colorbars — those are the caller's responsibility (usually `grid_with_colourbar`).
 
@@ -57,8 +61,8 @@ Draws one scatter panel on `ax` (defaults to `plt.gca()`).
 
 ```python
 def grid_with_colourbar(nrows, ncols, norm, cmap,
-                        row_labels=None, col_labels=None,
-                        x_label='', cbar_label='',
+                        y_labels=None, col_titles=None,
+                        x_labels='', cbar_label='',
                         figsize=None):
 ```
 
@@ -68,11 +72,10 @@ Creates a figure with an `nrows × ncols` grid of axes and a shared colorbar. Re
 - `nrows`, `ncols`: grid dimensions
 - `norm`: `matplotlib.colors.Normalize` — used to draw the colorbar; must be pre-computed by the caller
 - `cmap`: matplotlib colormap
-- `row_labels`: `list[str]` of length `nrows` or `None` — y-axis labels, applied to the leftmost column only
-- `col_labels`: `list[str]` of length `ncols` or `None` — column titles, applied to the top row only
-- `x_label`: `str` or `list[str]` of length `ncols` — x-axis label(s), applied to bottom-row axes only. If a single string, the same label is applied to all bottom-row axes (consistent with `sharex=True`). If a list, one label per column (for cases where `sharex=False` and columns have independent x-scales)
+- `y_labels`: `list[str]` of length `nrows` or `None` — y-axis labels, applied to the leftmost column only
+- `col_titles`: `list[str]` of length `ncols` or `None` — column titles, applied to the top row only
+- `x_labels`: `str` or `list[str]` of length `ncols` — x-axis label(s), applied to bottom-row axes only. If a single string, the same label is applied to all bottom-row axes (consistent with `sharex=True`). If a list, one label per column (for cases where `sharex=False` and columns have independent x-scales)
 - `cbar_label`: `str` — label for the colorbar
-- `clip_min`: passed through to `scatter_clipped` calls; also used to set the `sharex`/`sharey` shared axis range on the grid — `grid_with_colourbar` sets `xlim` and `ylim` on one representative axis so the shared range is established before the caller populates individual axes
 - `figsize`: passed to `plt.subplots`; defaults to `(3 * ncols, 2.7 * nrows)`
 
 **Behaviour:**
@@ -110,9 +113,9 @@ norm = mcolors.Normalize(vmin=min(all_c), vmax=max(all_c))
 # 3. create grid infrastructure
 fig, axes = grid_with_colourbar(
     2, 3, norm, plt.cm.Greens,
-    row_labels=['CV GLM Grid', 'CV Fixed Grid'],
-    col_labels=['$d=1$', '$d=2$', '$d=3$'],
-    x_label='BayesEM $R^2$',
+    y_labels=['CV GLM Grid', 'CV Fixed Grid'],
+    col_titles=['$d=1$', '$d=2$', '$d=3$'],
+    x_labels='BayesEM $R^2$',
     cbar_label='speed-up ratio',
 )
 
