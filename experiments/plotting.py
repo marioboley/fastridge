@@ -97,6 +97,75 @@ def scatter_clipped(x, y, c, norm, cmap, clip_min=-0.1, clip_max=1.0,
     return ax
 
 
+def grid_with_colourbar(nrows, ncols, norm, cmap,
+                        y_labels=None, col_titles=None,
+                        x_labels='', cbar_label='',
+                        cbar_fraction=0.56, figsize=None):
+    """Create an nrows x ncols grid of axes with a shared colorbar on the right.
+
+    Returns (fig, axes) where axes has shape (nrows, ncols). The caller populates
+    each axis — scatter_clipped is one option but the function is not scatter-specific.
+
+    Parameters
+    ----------
+    nrows, ncols : int
+    norm : matplotlib.colors.Normalize
+        Used to draw the colorbar; pre-compute over all data before calling.
+    cmap : matplotlib colormap
+    y_labels : str or list of str of length nrows, or None
+        Y-axis label(s) applied to the leftmost column only.
+        A single string is repeated for all rows (symmetric with x_labels).
+    col_titles : list of str, length ncols, or None
+        Column titles applied to the top row only.
+    x_labels : str or list of str of length ncols
+        X-axis label(s) applied to bottom-row axes. Single string applies to all.
+    cbar_label : str
+        Label for the colorbar.
+    cbar_fraction : float, default 0.56
+        Height of the colorbar as a fraction of the axes area height
+        (the vertical span set by subplots_adjust). Colorbar is centred on the
+        axes midpoint. Default reproduces the original figure layout.
+    figsize : tuple or None
+        Passed to plt.subplots. Default: (3 * ncols, 2.7 * nrows).
+    """
+    if figsize is None:
+        figsize = (3 * ncols, 2.7 * nrows)
+
+    bottom_adj, top_adj = 0.11, 0.93
+    fig, axes = plt.subplots(nrows, ncols, figsize=figsize,
+                             sharex=True, sharey=True, squeeze=False)
+    fig.subplots_adjust(left=0.11, right=0.84, bottom=bottom_adj, top=top_adj,
+                        hspace=0.06, wspace=0.04)
+
+    if col_titles:
+        for j, title in enumerate(col_titles):
+            axes[0, j].set_title(title)
+
+    y_labels_list = ([y_labels] * nrows if isinstance(y_labels, str)
+                     else (y_labels or []))
+    for i, label in enumerate(y_labels_list):
+        axes[i, 0].set_ylabel(label)
+
+    x_labels_list = [x_labels] * ncols if isinstance(x_labels, str) else list(x_labels)
+    for j, label in enumerate(x_labels_list):
+        axes[nrows - 1, j].set_xlabel(label)
+
+    for j in range(ncols):
+        axes[nrows - 1, j].set_xticks([0.0, 0.5, 1.0])
+    for i in range(nrows):
+        axes[i, 0].set_yticks([0.0, 0.5, 1.0])
+
+    cbar_h = cbar_fraction * (top_adj - bottom_adj)
+    cbar_b = (top_adj + bottom_adj) / 2 - cbar_h / 2
+    cbar_ax = fig.add_axes([0.86, cbar_b, 0.02, cbar_h])
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+    cbar = fig.colorbar(sm, cax=cbar_ax)
+    cbar.ax.yaxis.set_label_position('right')
+    cbar.set_label(cbar_label, rotation=90, labelpad=-30)
+
+    return fig, axes
+
+
 def plot_lambda_risks(ridgeCV, ridgeCV_test=None, ridgeEM=None, ax=None, axis_labels=True, title=None, localmin=True, dpi=300):
     ax1 = plt.gca() if ax is None else ax
     ax1.figure.set_size_inches(8.4, 4.8)
