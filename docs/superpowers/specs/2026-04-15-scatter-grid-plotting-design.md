@@ -63,7 +63,7 @@ Draws one scatter panel on `ax` (defaults to `plt.gca()`).
 def grid_with_colourbar(nrows, ncols, norm, cmap,
                         y_labels=None, col_titles=None,
                         x_labels='', cbar_label='',
-                        figsize=None):
+                        cbar_fraction=0.56, figsize=None):
 ```
 
 Creates a figure with an `nrows × ncols` grid of axes and a shared colorbar. Returns `(fig, axes)` where `axes` has shape `(nrows, ncols)`. The caller populates each axis however they like — `scatter_clipped` is one option but the function is not scatter-specific.
@@ -72,10 +72,11 @@ Creates a figure with an `nrows × ncols` grid of axes and a shared colorbar. Re
 - `nrows`, `ncols`: grid dimensions
 - `norm`: `matplotlib.colors.Normalize` — used to draw the colorbar; must be pre-computed by the caller
 - `cmap`: matplotlib colormap
-- `y_labels`: `list[str]` of length `nrows` or `None` — y-axis labels, applied to the leftmost column only
+- `y_labels`: `str` or `list[str]` of length `nrows` or `None` — y-axis labels, applied to the leftmost column only. A single string is repeated for all rows (symmetric with `x_labels`)
 - `col_titles`: `list[str]` of length `ncols` or `None` — column titles, applied to the top row only
-- `x_labels`: `str` or `list[str]` of length `ncols` — x-axis label(s), applied to bottom-row axes only. If a single string, the same label is applied to all bottom-row axes (consistent with `sharex=True`). If a list, one label per column (for cases where `sharex=False` and columns have independent x-scales)
+- `x_labels`: `str` or `list[str]` of length `ncols` — x-axis label(s), applied to bottom-row axes only. A single string is repeated for all columns
 - `cbar_label`: `str` — label for the colorbar
+- `cbar_fraction`: float (default `0.56`) — height of the colorbar as a fraction of the axes area height (the vertical span set by `subplots_adjust`). The colorbar is centred on the axes midpoint. Default reproduces the original figure layout
 - `figsize`: passed to `plt.subplots`; defaults to `(3 * ncols, 2.7 * nrows)`
 
 **Behaviour:**
