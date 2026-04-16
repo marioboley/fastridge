@@ -39,6 +39,64 @@ def plot_metrics(exp, metrics, prob_idx=None, figsize=None, **params):
     return fig, axs
 
 
+_SCATTER_PAD = 0.03
+
+
+def scatter_clipped(x, y, c, norm, cmap, clip_min=-0.1, clip_max=1.0,
+                    ref_lines=(0.0,), pad=_SCATTER_PAD, ax=None):
+    """Scatter plot with out-of-range points clipped and marked with dashed edges.
+
+    Points where either coordinate falls outside [clip_min, clip_max] are clipped
+    to the nearest bound and drawn with dashed edges. A diagonal reference line
+    runs from corner to corner of the axes. Operates on ax (default: plt.gca()).
+
+    Parameters
+    ----------
+    x, y : array-like of float
+        Coordinates, one entry per point.
+    c : array-like of float
+        Colour values, same length as x and y. Mapped via norm and cmap.
+    norm : matplotlib.colors.Normalize
+        Pre-computed normalisation — must cover all data in the grid for a
+        globally consistent colour scale.
+    cmap : matplotlib colormap
+    clip_min : float, default -0.1
+    clip_max : float, default 1.0
+    ref_lines : sequence of float, default (0.0,)
+        Positions of grey horizontal and vertical reference lines.
+    pad : float, default 0.03
+        Margin added beyond [clip_min, clip_max] on all sides.
+    ax : matplotlib.axes.Axes or None
+    """
+    if ax is None:
+        ax = plt.gca()
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    c = np.asarray(c, dtype=float)
+
+    lim = [clip_min - pad, clip_max + pad]
+    clipped = (x < clip_min) | (x > clip_max) | (y < clip_min) | (y > clip_max)
+    x_disp = np.clip(x, clip_min, clip_max)
+    y_disp = np.clip(y, clip_min, clip_max)
+    colors = cmap(norm(c))
+
+    if (~clipped).any():
+        ax.scatter(x_disp[~clipped], y_disp[~clipped], c=colors[~clipped],
+                   s=50, zorder=3, edgecolors='k', linewidths=0.6)
+    if clipped.any():
+        sc = ax.scatter(x_disp[clipped], y_disp[clipped], c=colors[clipped],
+                        s=50, zorder=4, edgecolors='k', linewidths=0.8)
+        sc.set_linestyle('--')
+
+    ax.plot(lim, lim, 'k--', lw=0.8, zorder=2)
+    for ref in ref_lines:
+        ax.axhline(ref, color='0.8', lw=0.5, zorder=1)
+        ax.axvline(ref, color='0.8', lw=0.5, zorder=1)
+    ax.set_xlim(lim)
+    ax.set_ylim(lim)
+    return ax
+
+
 def plot_lambda_risks(ridgeCV, ridgeCV_test=None, ridgeEM=None, ax=None, axis_labels=True, title=None, localmin=True, dpi=300):
     ax1 = plt.gca() if ax is None else ax
     ax1.figure.set_size_inches(8.4, 4.8)
