@@ -4,7 +4,9 @@ Problem classes for simulated and empirical data experiments.
 import warnings
 
 import numpy as np
+import pandas as pd
 from scipy.stats import wishart, multivariate_normal, uniform
+from sklearn.preprocessing import OneHotEncoder, PolynomialFeatures
 
 from data import get_dataset, DATASETS
 
@@ -147,6 +149,133 @@ class EmpiricalDataProblem:
                 )
             df[col] = fn(df[col])
         return df.drop(columns=[self.target]), df[self.target]
+
+
+class PolynomialExpansion:
+    """Callable value object that applies polynomial feature expansion.
+
+    Parameters
+    ----------
+    degree : int
+        Polynomial degree passed to PolynomialFeatures.
+    max_entries : int, optional
+        Maximum total entries (n * p) before column subsampling is applied.
+        Default 35_000_000. When exceeded, linear terms are always kept and
+        interaction columns are subsampled deterministically.
+
+    Examples
+    --------
+    >>> import pandas as pd
+    >>> import numpy as np
+    >>> X = pd.DataFrame({'a': [1.0, 2.0, 3.0], 'b': [4.0, 5.0, 6.0]})
+    >>> pe = PolynomialExpansion(2)
+    >>> list(pe(X).columns)
+    ['a', 'b', 'a^2', 'a b', 'b^2']
+    >>> pe(X).shape
+    (3, 5)
+    >>> PolynomialExpansion(2) == PolynomialExpansion(2)
+    True
+    >>> PolynomialExpansion(2) == PolynomialExpansion(3)
+    False
+    >>> len({PolynomialExpansion(2), PolynomialExpansion(2)})
+    1
+    >>> repr(PolynomialExpansion(2))
+    'PolynomialExpansion(2)'
+    >>> repr(PolynomialExpansion(2, max_entries=1000))
+    'PolynomialExpansion(2, max_entries=1000)'
+    >>> small = PolynomialExpansion(2, max_entries=10)
+    >>> result = small(X)
+    >>> 'a' in result.columns and 'b' in result.columns
+    True
+    >>> result.shape[1] < 5
+    True
+    """
+
+    def __init__(self, degree, max_entries=35_000_000):
+        self.degree = degree
+        self.max_entries = max_entries
+
+    def __call__(self, X):
+        poly = PolynomialFeatures(degree=self.degree, include_bias=False)
+        X_poly = pd.DataFrame(
+            poly.fit_transform(X),
+            columns=poly.get_feature_names_out(X.columns),
+            index=X.index
+        )
+        n, p = X_poly.shape
+        if n * p > self.max_entries:
+            linear_cols = list(X.columns)
+            interaction_cols = [c for c in X_poly.columns if c not in linear_cols]
+            pnew = int(np.ceil(self.max_entries / n)) - len(linear_cols)
+            rng = np.random.default_rng(self.degree)
+            sampled = sorted(rng.choice(len(interaction_cols), size=pnew, replace=False))
+            return X_poly[linear_cols + [interaction_cols[i] for i in sampled]]
+        return X_poly
+
+    def __eq__(self, other):
+        return isinstance(other, PolynomialExpansion) and \
+               (self.degree, self.max_entries) == (other.degree, other.max_entries)
+
+    def __hash__(self):
+        return hash((type(self).__name__, self.degree, self.max_entries))
+
+    def __repr__(self):
+        if self.max_entries == 35_000_000:
+            return f'PolynomialExpansion({self.degree})'
+        return f'PolynomialExpansion({self.degree}, max_entries={self.max_entries})'
+
+
+class OneHotEncodeCategories:
+    """Callable value object that one-hot encodes all categorical columns.
+
+    Detects non-numeric columns via pd.api.types.is_numeric_dtype. Encodes
+    them with OneHotEncoder(drop='first'), reconstructs a DataFrame. No-op
+    when all columns are numeric.
+
+    Examples
+    --------
+    >>> import pandas as pd
+    >>> enc = OneHotEncodeCategories()
+    >>> X_num = pd.DataFrame({'a': [1.0, 2.0], 'b': [3.0, 4.0]})
+    >>> enc(X_num).equals(X_num)
+    True
+    >>> X_cat = pd.DataFrame({'color': ['red', 'blue', 'red'], 'size': [1.0, 2.0, 3.0]})
+    >>> result = enc(X_cat)
+    >>> 'color' in result.columns
+    False
+    >>> 'size' in result.columns
+    True
+    >>> result.shape
+    (3, 2)
+    >>> OneHotEncodeCategories() == OneHotEncodeCategories()
+    True
+    >>> len({OneHotEncodeCategories(), OneHotEncodeCategories()})
+    1
+    >>> repr(OneHotEncodeCategories())
+    'OneHotEncodeCategories()'
+    """
+
+    def __call__(self, X):
+        cat_cols = [c for c in X.columns if not pd.api.types.is_numeric_dtype(X[c])]
+        if not cat_cols:
+            return X
+        enc = OneHotEncoder(drop='first', sparse_output=False)
+        encoded = enc.fit_transform(X[cat_cols])
+        return pd.concat([
+            X.drop(columns=cat_cols),
+            pd.DataFrame(encoded,
+                         columns=enc.get_feature_names_out(cat_cols),
+                         index=X.index)
+        ], axis=1)
+
+    def __eq__(self, other):
+        return isinstance(other, OneHotEncodeCategories)
+
+    def __hash__(self):
+        return hash(type(self).__name__)
+
+    def __repr__(self):
+        return 'OneHotEncodeCategories()'
 
 
 class linear_problem:
