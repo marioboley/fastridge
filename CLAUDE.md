@@ -41,7 +41,7 @@ Both classes follow the scikit-learn estimator API (`fit(X, y)` / `predict(X)`) 
 `experiments/` contains the reproducible experiment infrastructure:
 
 - **`problems.py`**: problem classes — `linear_problem` (synthetic, has `rvs()`) and `EmpiricalDataProblem` (real data, has `get_X_y()`). These are intended to be unified in a future refactor.
-- **`experiments.py`**: experiment runners — `Experiment` (synthetic), `RidgePathExperiment`, `run_real_data_experiments(problems, estimators, ...)` which takes a list of `EmpiricalDataProblem` and returns a parallel list of result dicts.
+- **`experiments.py`**: experiment runners — `Experiment` (synthetic), `RidgePathExperiment`, `EmpiricalDataExperiment` (real data, stores results as numpy arrays).
 - **`data.py`**: dataset registry (`DATASETS`) and retrieval (`get_dataset(name)`). Sources: `from_sklearn`, `from_ucimlrepo`, `from_url`, `from_zip`. Tier-1 only — raw DataFrames, no target selection.
 - **Notebooks** (`real_data.ipynb`, `tutorial.ipynb`, `sparse_designs.ipynb`, `double_asymptotic_trends.ipynb`): run via `nbmake` in CI. Cells tagged `skip-execution` are skipped — used for expensive full-experiment cells.
 

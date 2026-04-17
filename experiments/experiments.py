@@ -6,7 +6,6 @@ from sklearn.base import clone
 from sklearn.linear_model import Ridge, LinearRegression
 from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import OneHotEncoder, PolynomialFeatures
 from fastprogress.fastprogress import progress_bar
 
 
@@ -272,118 +271,6 @@ class RidgePathExperiment:
         return self
 
 
-def run_real_data_experiments(problems, estimators={}, n_iterations=100,
-                              test_prop=0.3, seed=None, polynomial=None,
-                              classification=False, verbose=True):
-    """Run repeated train/test experiments on a list of EmpiricalDataProblem instances.
-
-    Parameters
-    ----------
-    problems : list of EmpiricalDataProblem
-        Each problem specifies dataset, target column, and columns to drop.
-    estimators : dict mapping str to estimator
-    n_iterations : int
-    test_prop : float
-    seed : int or None
-    polynomial : int or None
-    classification : bool
-    verbose : bool
-
-    Returns
-    -------
-    list of dict
-        One result dict per problem, parallel to the input list. Each dict maps
-        estimator name to a dict of aggregated metrics.
-    """
-    results = []
-    for problem in problems:
-        X, y = problem.get_X_y()
-
-        if verbose:
-            print(problem.dataset, end=' ')
-
-        categorical_cols = [col for col in X.columns if not pd.api.types.is_numeric_dtype(X[col])]
-        encoder = OneHotEncoder(drop='first', sparse_output=False)
-        if categorical_cols:
-            encoded_X = encoder.fit_transform(X[categorical_cols])
-            X = pd.concat([
-                X.drop(categorical_cols, axis=1),
-                pd.DataFrame(encoded_X, columns=encoder.get_feature_names_out(categorical_cols))
-            ], axis=1)
-
-        if polynomial is not None:
-            poly = PolynomialFeatures(degree=polynomial, include_bias=False)
-            X_poly = poly.fit_transform(X)
-            X_poly = pd.DataFrame(X_poly, columns=poly.get_feature_names_out(X.columns))
-            npoly, ppoly = X_poly.shape
-            if npoly * ppoly > 35000000:
-                X_poly = X_poly.drop(X.columns, axis=1)
-                pnew = int(np.ceil(35000000 / npoly))
-                X_poly = X_poly.iloc[:, np.random.choice(X_poly.shape[1], size=pnew, replace=False)]
-                X = pd.concat([X, X_poly], axis=1)
-            else:
-                X = X_poly
-
-        if verbose:
-            print(f'(n={X.shape[0]}, p={X.shape[1]})', end='')
-
-        estimator_results = {
-            est_name: {'mse': [], 'r2': [], 'time': [], 'p': [], 'lambda': [], 'iter': [], 'CA': [], 'q': []}
-            for est_name in estimators
-        }
-
-        if seed is not None:
-            np.random.seed(seed)
-
-        for i in range(n_iterations):
-            if verbose:
-                print('.', end='')
-            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_prop)
-            std = X_train.std()
-            non_zero_std_cols = std[std != 0].index
-            X_train = X_train[non_zero_std_cols]
-            X_test = X_test[non_zero_std_cols]
-
-            for est_name, estimator in estimators.items():
-                t0 = time.time()
-                estimator.fit(X_train, y_train)
-                elapsed = time.time() - t0
-
-                if classification:
-                    estimator_results[est_name]['CA'].append(estimator.score(X_test, y_test))
-                    estimator_results[est_name]['p'].append(X_train.shape[1])
-                    estimator_results[est_name]['q'].append(len(estimator.classes_))
-                else:
-                    y_pred = estimator.predict(X_test)
-                    estimator_results[est_name]['mse'].append(mean_squared_error(y_test, y_pred))
-                    estimator_results[est_name]['r2'].append(r2_score(y_test, y_pred))
-                    estimator_results[est_name]['p'].append(len(estimator.coef_))
-                    estimator_results[est_name]['lambda'].append(estimator.alpha_)
-
-                estimator_results[est_name]['time'].append(elapsed)
-                if est_name == 'EM':
-                    estimator_results[est_name]['iter'].append(estimator.iterations_)
-
-        data_results = {}
-        for est_name, er in estimator_results.items():
-            data_results[est_name] = {
-                'mse':     np.mean(er['mse']) if er['mse'] else float('nan'),
-                'r2':      np.mean(er['r2']) if er['r2'] else float('nan'),
-                'time':    np.mean(er['time']),
-                'p':       np.mean(er['p']),
-                'n_train': int(X_train.shape[0]),
-                'lambda':  np.mean(er['lambda']) if er['lambda'] else float('nan'),
-                'iter':    np.mean(er['iter']) if er['iter'] else 100,
-                'CA':      np.mean(er['CA']) if er['CA'] else float('nan'),
-                'q':       np.mean(er['q']) if er['q'] else float('nan'),
-            }
-        results.append(data_results)
-        if verbose:
-            print()
-
-    return results
-
-
 class EmpiricalDataExperiment:
     """Run repeated train/test experiments on a list of EmpiricalDataProblem instances.
 
@@ -391,9 +278,8 @@ class EmpiricalDataExperiment:
     ``(n_iterations, n_problems, 1, n_estimators)`` per metric, matching the
     array layout of ``Experiment``. Failed runs (exception during fit) are
     recorded as NaN and trigger a ``warnings.warn``. The seed is reset before
-    each problem's iteration loop, replicating the exact behaviour of the
-    legacy ``run_real_data_experiments`` function so that each problem gets the
-    same deterministic split sequence regardless of list ordering.
+    each problem's iteration loop so that each problem gets the same
+    deterministic split sequence regardless of list ordering.
 
     Parameters
     ----------
@@ -402,8 +288,6 @@ class EmpiricalDataExperiment:
     n_iterations : int
     test_prop : float, default 0.3
     seed : int or None
-    polynomial : int or None
-        If given, applies ``PolynomialFeatures(degree=polynomial)`` after OHE.
     stats : list of metric callables or None
         Each callable has signature ``(est, prob, x, y)``. Defaults to
         ``empirical_default_stats``.
@@ -427,14 +311,13 @@ class EmpiricalDataExperiment:
     """
 
     def __init__(self, problems, estimators, n_iterations, test_prop=0.3,
-                 seed=None, polynomial=None, stats=None, est_names=None,
+                 seed=None, stats=None, est_names=None,
                  verbose=True):
         self.problems = problems
         self.estimators = estimators
         self.n_iterations = n_iterations
         self.test_prop = test_prop
         self.seed = seed
-        self.polynomial = polynomial
         self.stats = empirical_default_stats if stats is None else stats
         self.est_names = [str(e) for e in estimators] if est_names is None else est_names
         self.verbose = verbose
@@ -453,32 +336,6 @@ class EmpiricalDataExperiment:
 
             if self.verbose:
                 print(problem.dataset, end=' ')
-
-            categorical_cols = [col for col in X.columns
-                                if not pd.api.types.is_numeric_dtype(X[col])]
-            if categorical_cols:
-                encoder = OneHotEncoder(drop='first', sparse_output=False)
-                encoded = encoder.fit_transform(X[categorical_cols])
-                X = pd.concat([
-                    X.drop(categorical_cols, axis=1),
-                    pd.DataFrame(encoded,
-                                 columns=encoder.get_feature_names_out(categorical_cols))
-                ], axis=1)
-
-            if self.polynomial is not None:
-                poly = PolynomialFeatures(degree=self.polynomial, include_bias=False)
-                X_poly = poly.fit_transform(X)
-                X_poly = pd.DataFrame(X_poly,
-                                      columns=poly.get_feature_names_out(X.columns))
-                npoly, ppoly = X_poly.shape
-                if npoly * ppoly > 35_000_000:
-                    X_poly = X_poly.drop(X.columns, axis=1)
-                    pnew = int(np.ceil(35_000_000 / npoly))
-                    X_poly = X_poly.iloc[
-                        :, np.random.choice(X_poly.shape[1], size=pnew, replace=False)]
-                    X = pd.concat([X, X_poly], axis=1)
-                else:
-                    X = X_poly
 
             self.ns[prob_idx, 0] = int(X.shape[0] * (1 - self.test_prop))
 
