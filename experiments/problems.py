@@ -186,8 +186,17 @@ class PolynomialExpansion:
         Polynomial degree passed to PolynomialFeatures.
     max_entries : int, optional
         Maximum total entries (n * p) before column subsampling is applied.
-        Default 35_000_000. When exceeded, linear terms are always kept and
+        Default 50_000_000 (= 35M / 0.7, the paper-correct budget for a 70/30
+        train/test split). When exceeded, linear terms are always kept and
         interaction columns are subsampled deterministically.
+    budget_target : {'total', 'interaction'}, optional
+        How the column budget is applied. ``'total'`` (default): budget is the
+        maximum number of *total* columns (linear + interaction); interaction
+        columns kept = ``max(0, ceil(max_entries/n) - p_linear)``. This matches
+        the NeurIPS 2023 paper. ``'interaction'``: budget is applied to
+        interaction columns only (``ceil(max_entries/n)`` interaction columns
+        kept, regardless of p_linear); this reproduces the legacy experiment
+        runner behaviour, which was a bug relative to the paper.
 
     Examples
     --------
@@ -209,17 +218,27 @@ class PolynomialExpansion:
     'PolynomialExpansion(2)'
     >>> repr(PolynomialExpansion(2, max_entries=1000))
     'PolynomialExpansion(2, max_entries=1000)'
-    >>> small = PolynomialExpansion(2, max_entries=10)
+    >>> repr(PolynomialExpansion(2, budget_target='interaction'))
+    "PolynomialExpansion(2, budget_target='interaction')"
+
+    With subsampling (budget_target='total', default): budget bounds total cols.
+    >>> small = PolynomialExpansion(2, max_entries=9)
     >>> result = small(X)
+    >>> result.shape[1]
+    3
     >>> 'a' in result.columns and 'b' in result.columns
     True
-    >>> result.shape[1] < 5
-    True
+
+    With budget_target='interaction': budget bounds only interaction cols.
+    >>> legacy = PolynomialExpansion(2, max_entries=9, budget_target='interaction')
+    >>> legacy(X).shape[1]
+    5
     """
 
-    def __init__(self, degree, max_entries=35_000_000):
+    def __init__(self, degree, max_entries=50_000_000, budget_target='total'):
         self.degree = degree
         self.max_entries = max_entries
+        self.budget_target = budget_target
 
     def __call__(self, X):
         poly = PolynomialFeatures(degree=self.degree, include_bias=False)
@@ -232,7 +251,11 @@ class PolynomialExpansion:
         if n * p > self.max_entries:
             linear_cols = list(X.columns)
             interaction_cols = [c for c in X_poly.columns if c not in linear_cols]
-            pnew = int(np.ceil(self.max_entries / n)) - len(linear_cols)
+            p_budget = int(np.ceil(self.max_entries / n))
+            if self.budget_target == 'total':
+                pnew = max(0, min(len(interaction_cols), p_budget - len(linear_cols)))
+            else:
+                pnew = min(len(interaction_cols), p_budget)
             rng = np.random.default_rng(self.degree)
             sampled = sorted(rng.choice(len(interaction_cols), size=pnew, replace=False))
             return X_poly[linear_cols + [interaction_cols[i] for i in sampled]]
@@ -240,15 +263,19 @@ class PolynomialExpansion:
 
     def __eq__(self, other):
         return isinstance(other, PolynomialExpansion) and \
-               (self.degree, self.max_entries) == (other.degree, other.max_entries)
+               (self.degree, self.max_entries, self.budget_target) == \
+               (other.degree, other.max_entries, other.budget_target)
 
     def __hash__(self):
-        return hash((type(self).__name__, self.degree, self.max_entries))
+        return hash((type(self).__name__, self.degree, self.max_entries, self.budget_target))
 
     def __repr__(self):
-        if self.max_entries == 35_000_000:
-            return f'PolynomialExpansion({self.degree})'
-        return f'PolynomialExpansion({self.degree}, max_entries={self.max_entries})'
+        parts = [str(self.degree)]
+        if self.max_entries != 50_000_000:
+            parts.append(f'max_entries={self.max_entries}')
+        if self.budget_target != 'total':
+            parts.append(f'budget_target={self.budget_target!r}')
+        return f'PolynomialExpansion({", ".join(parts)})'
 
 
 class OneHotEncodeCategories:
