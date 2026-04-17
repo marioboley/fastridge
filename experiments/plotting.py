@@ -100,7 +100,8 @@ def scatter_clipped(x, y, c, norm, cmap, clip_min=-0.1, clip_max=1.0,
 def grid_with_colourbar(nrows, ncols, norm, cmap,
                         y_labels=None, col_titles=None,
                         x_labels='', cbar_label='',
-                        cbar_fraction=0.56, figsize=None):
+                        cbar_fraction=1.0, cbar_label_kw=None,
+                        figsize=None):
     """Create an nrows x ncols grid of axes with a shared colorbar on the right.
 
     Returns (fig, axes) where axes has shape (nrows, ncols). The caller populates
@@ -120,16 +121,24 @@ def grid_with_colourbar(nrows, ncols, norm, cmap,
     x_labels : str or list of str of length ncols
         X-axis label(s) applied to bottom-row axes. Single string applies to all.
     cbar_label : str
-        Label for the colorbar.
-    cbar_fraction : float, default 0.56
+        Label for the colorbar. Placed via fig.text() at absolute figure
+        coordinates so positioning is stable across LaTeX and non-LaTeX rendering.
+    cbar_fraction : float, default 1.0
         Height of the colorbar as a fraction of the axes area height
         (the vertical span set by subplots_adjust). Colorbar is centred on the
-        axes midpoint. Default reproduces the original figure layout.
+        axes midpoint.
+    cbar_label_kw : dict or None
+        Extra keyword arguments forwarded to fig.text() for the colorbar label.
+        Defaults to {}. Note: when text.usetex is active (as set at module level
+        in plotting.py), fontweight has no effect — use r'\textbf{label}' in
+        cbar_label instead.
     figsize : tuple or None
         Passed to plt.subplots. Default: (3 * ncols, 2.7 * nrows).
     """
     if figsize is None:
         figsize = (3 * ncols, 2.7 * nrows)
+    if cbar_label_kw is None:
+        cbar_label_kw = {}
 
     bottom_adj, top_adj = 0.11, 0.93
     fig, axes = plt.subplots(nrows, ncols, figsize=figsize,
@@ -157,11 +166,13 @@ def grid_with_colourbar(nrows, ncols, norm, cmap,
 
     cbar_h = cbar_fraction * (top_adj - bottom_adj)
     cbar_b = (top_adj + bottom_adj) / 2 - cbar_h / 2
-    cbar_ax = fig.add_axes([0.86, cbar_b, 0.02, cbar_h])
+    cbar_left, cbar_width = 0.86, 0.02
+    cbar_ax = fig.add_axes([cbar_left, cbar_b, cbar_width, cbar_h])
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
-    cbar = fig.colorbar(sm, cax=cbar_ax)
-    cbar.ax.yaxis.set_label_position('right')
-    cbar.set_label(cbar_label, rotation=90, labelpad=-30)
+    fig.colorbar(sm, cax=cbar_ax)
+    if cbar_label:
+        fig.text(cbar_left + cbar_width / 2, cbar_b + cbar_h / 2, cbar_label,
+                 rotation=90, ha='center', va='center', **cbar_label_kw)
 
     return fig, axes
 

@@ -63,7 +63,8 @@ Draws one scatter panel on `ax` (defaults to `plt.gca()`).
 def grid_with_colourbar(nrows, ncols, norm, cmap,
                         y_labels=None, col_titles=None,
                         x_labels='', cbar_label='',
-                        cbar_fraction=0.56, figsize=None):
+                        cbar_fraction=0.56, cbar_label_kw=None,
+                        figsize=None):
 ```
 
 Creates a figure with an `nrows × ncols` grid of axes and a shared colorbar. Returns `(fig, axes)` where `axes` has shape `(nrows, ncols)`. The caller populates each axis however they like — `scatter_clipped` is one option but the function is not scatter-specific.
@@ -77,6 +78,7 @@ Creates a figure with an `nrows × ncols` grid of axes and a shared colorbar. Re
 - `x_labels`: `str` or `list[str]` of length `ncols` — x-axis label(s), applied to bottom-row axes only. A single string is repeated for all columns
 - `cbar_label`: `str` — label for the colorbar
 - `cbar_fraction`: float (default `0.56`) — height of the colorbar as a fraction of the axes area height (the vertical span set by `subplots_adjust`). The colorbar is centred on the axes midpoint. Default reproduces the original figure layout
+- `cbar_label_kw`: `dict` or `None` — keyword arguments forwarded to `fig.text()` for the colorbar label (e.g. `{'fontweight': 'bold'}`). Defaults to `{}`. The label is placed with `fig.text()` at absolute figure coordinates (just right of the colorbar, vertically centred) — this is robust to LaTeX rendering mode, unlike `cbar.set_label()` with a negative `labelpad`
 - `figsize`: passed to `plt.subplots`; defaults to `(3 * ncols, 2.7 * nrows)`
 
 **Behaviour:**
@@ -84,7 +86,7 @@ Creates a figure with an `nrows × ncols` grid of axes and a shared colorbar. Re
 - Applies `fig.subplots_adjust` for tight layout with room for the colorbar
 - Sets x-axis ticks to `[0.0, 0.5, 1.0]` on all bottom-row axes
 - Sets y-axis ticks to `[0.0, 0.5, 1.0]` on all left-column axes
-- Adds colorbar in a new axes to the right of the grid using `fig.add_axes`
+- Adds colorbar in a new axes to the right of the grid using `fig.add_axes`; places the colorbar label with `fig.text()` rather than `cbar.set_label()` so positioning is stable across rendering modes
 - Does **not** call `scatter_clipped` — the caller does that after receiving `axes`
 - Does **not** save — caller handles `fig.savefig(...)` if desired
 - Returns `(fig, axes)`
