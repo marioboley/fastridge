@@ -15,8 +15,8 @@ class EmpiricalDataProblem:
     """A prediction problem defined by a dataset and a target variable.
 
     Optionally, can also define pre-processing steps of column dropping,
-    missing value handling, and column transformations (applied in this
-    order).
+    missing value handling, and feature/target transformations (applied in
+    this order).
 
     Parameters
     ----------
@@ -31,12 +31,14 @@ class EmpiricalDataProblem:
         How to handle remaining NaN values after dropping rows where the
         target is NaN. 'drop_rows' drops any row with a NaN; 'drop_cols'
         drops any column with a NaN. None (default) leaves NaNs in place.
-    transforms : list of (str, callable) pairs, optional
-        Ordered sequence of column transforms applied after NaN handling.
-        Each pair ``(column_name, fn)`` applies ``fn`` to the named column
-        in-place; ``fn`` must map a ``pd.Series`` to a ``pd.Series`` of the
-        same length (numpy ufuncs satisfy this). Raises ``ValueError`` if a
-        named column is absent from the DataFrame at transform time.
+    x_transforms : list of callable, optional
+        Ordered sequence of ``DataFrame -> DataFrame`` transforms applied to
+        X after the X/y split. ``OneHotEncodeCategories`` and
+        ``PolynomialExpansion`` satisfy this contract.
+    y_transforms : list of callable, optional
+        Ordered sequence of ``Series -> Series`` transforms applied to y
+        after the X/y split. Numpy ufuncs (``np.log``, ``np.log1p``) satisfy
+        this contract directly.
 
     Examples
     --------
@@ -80,22 +82,28 @@ class EmpiricalDataProblem:
     >>> list(X.index) == list(y.index) == list(range(201))
     True
 
-    Column transforms:
+    y_transforms — apply callables to the target after the X/y split:
 
     >>> import numpy as np
     >>> diabetes_log = EmpiricalDataProblem('diabetes', 'target',
-    ...                                     transforms=[('target', np.log)])
+    ...                                     y_transforms=[np.log])
     >>> X, y_log = diabetes_log.get_X_y()
     >>> X_base, y_base = diabetes.get_X_y()
     >>> np.allclose(y_log.values, np.log(y_base.values))
     True
-    >>> EmpiricalDataProblem('diabetes', 'target',
-    ...     transforms=[('nonexistent', np.log)]).get_X_y()
-    Traceback (most recent call last):
-        ...
-    ValueError: Column 'nonexistent' not found in dataset 'diabetes' at transform time.
 
-    Value-object identity (hash and equality based on full definition):
+    x_transforms — apply callables to X after the X/y split:
+
+    >>> ohe = EmpiricalDataProblem('automobile', 'price',
+    ...                            nan_policy='drop_rows',
+    ...                            x_transforms=[OneHotEncodeCategories()])
+    >>> X_ohe, y_ohe = ohe.get_X_y()
+    >>> X_ohe.shape[0]
+    159
+    >>> 'fuel-type_gas' in X_ohe.columns
+    True
+
+    Value-object identity (repr-based hash and equality):
 
     >>> p1 = EmpiricalDataProblem('diabetes', 'target')
     >>> p2 = EmpiricalDataProblem('diabetes', 'target')
@@ -112,23 +120,41 @@ class EmpiricalDataProblem:
     ()
     >>> EmpiricalDataProblem('diabetes', 'target', drop=['bmi']).drop
     ('bmi',)
+    >>> repr(EmpiricalDataProblem('diabetes', 'target'))
+    "EmpiricalDataProblem('diabetes', 'target')"
+    >>> repr(EmpiricalDataProblem('yacht', 'Residuary_resistance',
+    ...     drop=['Froude_number'], nan_policy='drop_rows',
+    ...     y_transforms=[np.log]))
+    "EmpiricalDataProblem('yacht', 'Residuary_resistance', drop=['Froude_number'], nan_policy='drop_rows', y_transforms=[<ufunc 'log'>])"
     """
 
-    def __init__(self, dataset, target, drop=None, nan_policy=None, transforms=None):
+    def __init__(self, dataset, target, drop=None, nan_policy=None,
+                 x_transforms=None, y_transforms=None):
         self.dataset = dataset
         self.target = target
         self.drop = tuple(drop or [])
         self.nan_policy = nan_policy
-        self.transforms = tuple(transforms or [])
+        self.x_transforms = tuple(x_transforms or [])
+        self.y_transforms = tuple(y_transforms or [])
+        self._repr = (
+            f'EmpiricalDataProblem({self.dataset!r}, {self.target!r}'
+            + (f', drop={list(self.drop)!r}' if self.drop else '')
+            + (f', nan_policy={self.nan_policy!r}' if self.nan_policy else '')
+            + (f', x_transforms={list(self.x_transforms)!r}' if self.x_transforms else '')
+            + (f', y_transforms={list(self.y_transforms)!r}' if self.y_transforms else '')
+            + ')'
+        )
+
+    def __repr__(self):
+        return self._repr
 
     def __eq__(self, other):
         if not isinstance(other, EmpiricalDataProblem):
             return NotImplemented
-        return (self.dataset, self.target, self.drop, self.nan_policy, self.transforms) == \
-               (other.dataset, other.target, other.drop, other.nan_policy, other.transforms)
+        return self._repr == other._repr
 
     def __hash__(self):
-        return hash((self.dataset, self.target, self.drop, self.nan_policy, self.transforms))
+        return hash(self._repr)
 
     def get_X_y(self):
         df = get_dataset(self.dataset)
@@ -142,13 +168,13 @@ class EmpiricalDataProblem:
         elif self.nan_policy == 'drop_cols':
             df = df.dropna(axis=1)
         df = df.reset_index(drop=True)
-        for col, fn in self.transforms:
-            if col not in df.columns:
-                raise ValueError(
-                    f"Column '{col}' not found in dataset '{self.dataset}' at transform time."
-                )
-            df[col] = fn(df[col])
-        return df.drop(columns=[self.target]), df[self.target]
+        X = df.drop(columns=[self.target])
+        y = df[self.target]
+        for fn in self.y_transforms:
+            y = fn(y)
+        for fn in self.x_transforms:
+            X = fn(X)
+        return X, y
 
 
 class PolynomialExpansion:
@@ -355,12 +381,16 @@ def random_problem(p, r=None, sigma_beta=1.0, sigma_eps=0.5, rng=None):
     return linear_problem(beta, sigma_eps, x_dist)
 
 
+_OHE = [OneHotEncodeCategories()]
+
 NEURIPS2023 = frozenset({
-    EmpiricalDataProblem('abalone',          'Rings'),
+    EmpiricalDataProblem('abalone',          'Rings',
+                         x_transforms=_OHE),
     EmpiricalDataProblem('airfoil',          'scaled-sound-pressure'),
     EmpiricalDataProblem('automobile',       'price',
                          nan_policy='drop_rows',
-                         transforms=[('price', np.log)]),
+                         x_transforms=_OHE,
+                         y_transforms=[np.log]),
     EmpiricalDataProblem('autompg',          'mpg',
                          drop=['car_name'], nan_policy='drop_rows'),
     EmpiricalDataProblem('blog',             'V281'),
@@ -374,9 +404,11 @@ NEURIPS2023 = frozenset({
     EmpiricalDataProblem('eye',              'y'),
     EmpiricalDataProblem('facebook',         'Total Interactions',
                          drop=['comment', 'like', 'share'],
-                         nan_policy='drop_rows'),
+                         nan_policy='drop_rows',
+                         x_transforms=_OHE),
     EmpiricalDataProblem('forest',           'area',
-                         transforms=[('area', np.log1p)]),
+                         x_transforms=_OHE,
+                         y_transforms=[np.log1p]),
     EmpiricalDataProblem('naval_propulsion', 'GT_compressor_decay',
                          drop=['GT_turbine_decay']),
     EmpiricalDataProblem('naval_propulsion', 'GT_turbine_decay',
@@ -388,21 +420,35 @@ NEURIPS2023 = frozenset({
     EmpiricalDataProblem('real_estate',      'Y house price of unit area'),
     EmpiricalDataProblem('ribo',             'y'),
     EmpiricalDataProblem('student',          'G3',
-                         drop=['G1', 'G2']),
+                         drop=['G1', 'G2'],
+                         x_transforms=_OHE),
     EmpiricalDataProblem('tomshw',           'V97'),
     EmpiricalDataProblem('twitter',          'V78'),
     EmpiricalDataProblem('yacht',            'Residuary_resistance',
-                         transforms=[('Residuary_resistance', np.log)]),
+                         y_transforms=[np.log]),
 })
 
+
+def _with_polynomial(p, degree):
+    return EmpiricalDataProblem(
+        p.dataset, p.target, list(p.drop), p.nan_policy,
+        x_transforms=list(p.x_transforms) + [PolynomialExpansion(degree)],
+        y_transforms=list(p.y_transforms),
+    )
+
+
 NEURIPS2023_D2 = frozenset(
-    p for p in NEURIPS2023
-    if 'n' in DATASETS[p.dataset]
+    _with_polynomial(p, 2)
+    for p in NEURIPS2023
+    if 'p' in DATASETS[p.dataset]
     and DATASETS[p.dataset]['p'] < 1000
 )
 
 NEURIPS2023_D3 = frozenset(
-    p for p in NEURIPS2023_D2
-    if DATASETS[p.dataset]['p'] < 150
+    _with_polynomial(p, 3)
+    for p in NEURIPS2023
+    if 'p' in DATASETS[p.dataset]
+    and 'n' in DATASETS[p.dataset]
+    and DATASETS[p.dataset]['p'] < 150
     and DATASETS[p.dataset]['n'] < 20000
 )
