@@ -1,5 +1,14 @@
 # Result Persistence Design
 
+## Prerequisite
+
+This spec requires the [preprocessing pipeline design](2026-04-17-preprocessing-pipeline-design.md)
+to be implemented first. That spec establishes `EmpiricalDataProblem.__repr__` as
+the canonical, session-stable string identity used here to derive cache keys.
+No changes to `problems.py` are made by this spec.
+
+---
+
 ## Goal
 
 Add optional result caching to `EmpiricalDataExperiment` so that re-running with a
@@ -172,33 +181,30 @@ in the directory path, not inside the file.
 {ClassName}__{short_hash}
 ```
 
-`polynomial` is moved from `EmpiricalDataExperiment` into `EmpiricalDataProblem`
-as a constructor parameter (default `None`). It defines the feature space and belongs
-to the problem's identity, not the experiment runner. In this spec the move is
-identity-only: `run()` still applies the polynomial expansion itself, reading
-`problem.polynomial` instead of `self.polynomial`. The natural next step — moving
-the expansion into `EmpiricalDataProblem.get_X_y()` so the problem is fully
-self-contained — is left for a future refactoring. The existing problem sets that
-currently pass `polynomial` to the experiment (e.g. for d=2 and d=3 problems)
-are updated to pass it to the problem constructor instead.
+`polynomial` is superseded by the [preprocessing pipeline design](2026-04-17-preprocessing-pipeline-design.md):
+polynomial expansion moves fully into `EmpiricalDataProblem` as a
+`PolynomialExpansion` entry in `x_transforms`, not as a separate constructor
+parameter. The `polynomial` parameter is not added to `EmpiricalDataProblem`.
 
-`EmpiricalDataProblem` gains a `cache_key()` method returning the first 8 hex chars
-of `md5(str((self.dataset, self.target, self.drop, self.nan_policy,
-str(self.transforms), self.polynomial)))`. The class name is NOT included in the
-hash — it is already present as the directory prefix and including it in the hash
-would be redundant. This treats the problem as a value object whose identity is
-fully determined by its constructor arguments. `__hash__` is updated to return
-`hash(self.cache_key())` so in-memory identity (dict keys, sets) and filesystem
-identity share the same canonical basis. Python's `hash(identity_tuple)` is not
-reused because Python randomises string hashing across sessions (`PYTHONHASHSEED`).
+`EmpiricalDataProblem` gains a stable `__repr__` that fully encodes its identity.
+The `problem_key` is derived from it by the persistence layer:
+
+```python
+import hashlib
+problem_key = f'{type(problem).__name__}__{hashlib.md5(repr(problem).encode()).hexdigest()}'
+```
+
+No `cache_key()` method is added to `EmpiricalDataProblem` — the persistence
+layer computes the key directly from `repr()`. `__hash__` is updated to
+`hash(repr(self))` for consistent in-memory identity (sets, dict keys); the
+persistence layer uses `repr()` directly for cross-session stable filesystem
+paths rather than relying on `__hash__`.
 
 `test_prop` is not part of the problem key — it is captured by `<n_train>/` in the
 path, since different `test_prop` values on the same problem yield different n_train
 values and thus different directories.
 
-The `problem_key` is `f'{type(problem).__name__}__{problem.cache_key()}'`.
-
-Example: `EmpiricalDataProblem__a3f2b1c4`
+Example: `EmpiricalDataProblem__a3f2b1c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0`
 
 ### `estimator_key`
 
@@ -230,8 +236,7 @@ EmpiricalDataExperiment(
     seed_mode='legacy',         # new
     seed_scope='series',        # new
     seed_progression='fixed',   # new
-    cache=False,                # new
-    polynomial=None, stats=None, est_names=None, verbose=True
+    stats=None, est_names=None, verbose=True
 )
 ```
 
@@ -280,10 +285,6 @@ without breaking changes.
 - Modify: `experiments/experiments.py` — add `seed_mode`, `seed_scope`,
   `seed_progression` to `EmpiricalDataExperiment.__init__`; update `run()`;
   add `CACHE_DIR` module constant
-- Modify: `experiments/problems.py` — add `polynomial` parameter to
-  `EmpiricalDataProblem.__init__`; add `cache_key()` method; update `__hash__` to
-  derive from `cache_key()`; update `NEURIPS2023_D2`, `NEURIPS2023_D3` problem sets
-  to pass `polynomial` to the problem rather than the experiment
 - Create: `results/.gitignore` — containing `*` and `!.gitignore`
 
 ---

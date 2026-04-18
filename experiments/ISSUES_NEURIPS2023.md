@@ -104,7 +104,7 @@ and several missing-value patterns that interact with the zero-variance filter
 in ways that differ from the paper's reported count. The root cause has not been
 identified.
 
-## Seeding Bug in EmpiricalDataExperiment
+## Seeding
 
 In `EmpiricalDataExperiment.run()`, the experiment seed is applied to the global
 numpy random state *after* `problem.get_X_y()` is called:
