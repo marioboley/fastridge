@@ -63,6 +63,8 @@ Both classes follow the scikit-learn estimator API (`fit(X, y)` / `predict(X)`) 
 
 **Module names:** single word, no underscores (e.g. `data`, `problems`, `experiments`).
 
+**Docstrings and comments:** Use only standard keyboard characters — no Unicode math or typographic symbols (e.g. avoid `×`, `∗`, `≤`, `²`). Use plain ASCII equivalents (`*`, `<=`, `**2`, etc.).
+
 **Imports:** Default to top-level imports. Inline imports (`from x import y` inside a function) are acceptable only for optional external dependencies that may not be installed in all environments (e.g. `ucimlrepo` is not a package dependency). When using an inline import, add a module-level comment documenting the optional dependency so it is visible without reading function bodies. Raise the question with the user if a new case arises — the rule may evolve.
 
 ## Production Capacity
