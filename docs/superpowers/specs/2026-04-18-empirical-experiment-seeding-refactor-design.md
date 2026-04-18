@@ -157,44 +157,50 @@ if len(self.ns) != len(self.problems):
 Typically `n_sizes=1` for empirical experiments; multiple n values per problem
 support learning-curve experiments.
 
-### `_get_rng(self, unit_idx)` class method
+### `_set_seed(self, unit_idx)` class method
 
-A single private method encapsulates mode, progression, and seed computation:
+A single private method mutates `self.rng` (modern mode) or global numpy state
+(legacy mode). No return value — purely a state-modifying operation:
 
 ```python
-def _get_rng(self, unit_idx):
+def _set_seed(self, unit_idx):
     if self.seed is None:
-        return None
+        return
     seed_val = self.seed if self.seed_progression == 'fixed' else self.seed + unit_idx
-    if self.seed_mode == 'modern':
-        return np.random.default_rng(seed_val)
-    np.random.seed(seed_val)
-    return None
+    if self.seed_mode == 'legacy':
+        np.random.seed(seed_val)
+    else:
+        self.rng = np.random.default_rng(seed_val)
 ```
 
 `unit_idx` is 0 for experiment scope, `prob_idx` for series scope, `iter_idx` for
-trial scope. For legacy mode the method seeds global state as a side effect and
-returns `None`; for modern mode it returns a fresh `Generator`.
+trial scope. `self.rng` is not set in `__init__` — it is a run-time attribute
+initialised to `None` at the start of `run()` and updated by `_set_seed` at each
+scope boundary. In legacy mode `_set_seed` seeds global state and leaves `self.rng`
+as `None`; the loop always passes `self.rng` to `rvs` unconditionally regardless of
+mode.
 
 ### `run()` loop structure
 
 ```python
 def run(self, overwrite=False):
     ...
-    rng = self._get_rng(0) if self.seed_scope == 'experiment' else None
+    self.rng = None
+    if self.seed_scope == 'experiment':
+        self._set_seed(unit_idx=0)
 
     for prob_idx, problem in enumerate(self.problems):
         for n_idx, n_train in enumerate(self.ns[prob_idx]):
 
             if self.seed_scope == 'series':
-                rng = self._get_rng(prob_idx)
+                self._set_seed(prob_idx)
 
             for iter_idx in range(self.reps):
 
                 if self.seed_scope == 'trial':
-                    rng = self._get_rng(iter_idx)
+                    self._set_seed(iter_idx)
 
-                X_train, X_test, y_train, y_test = problem.rvs(n_train, rng=rng)
+                X_train, X_test, y_train, y_test = problem.rvs(n_train, rng=self.rng)
 
                 for est_idx, est in enumerate(self.estimators):
                     _est = clone(est, safe=False)
@@ -278,8 +284,9 @@ parameters are the necessary foundation for that future step.
 - **Modify** `experiments/experiments.py`:
   - `EmpiricalDataExperiment.__init__` — replace `test_prop` / `n_iterations` with
     `ns` / `reps`; add `seed_mode`, `seed_scope`, `seed_progression`.
+  - `EmpiricalDataExperiment.__init__` — initialise `self.rng = None`.
   - `EmpiricalDataExperiment.run` — restructure loop; move zero-variance filter
-    into `rvs`; replace free helpers with `_get_rng` class method.
+    into `rvs`; add `_set_seed` class method.
   - Update docstring example (currently calls with `n_iterations=`, `seed=`).
 
 - **Modify** `experiments/real_data.ipynb` — replace `test_prop=0.3` /
