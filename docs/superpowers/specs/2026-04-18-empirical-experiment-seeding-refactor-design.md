@@ -4,8 +4,10 @@
 
 Refactor `EmpiricalDataProblem` and `EmpiricalDataExperiment` to:
 
-1. Rename `get_X_y` to `rvs` — unifying the problem interface with `linear_problem`
-   so both return `(X_train, X_test, y_train, y_test)` via `rvs(n_train, rng=rng)`.
+1. Unify the problem interface — rename `get_X_y` to `rvs` so both
+   `EmpiricalDataProblem` and `linear_problem` share the same calling convention
+   `rvs(n, rng=rng)`, with `EmpiricalDataProblem.rvs` returning a train/test split
+   when `n_train` is given.
 2. Unify the call site — `rvs(n_train, rng=rng)` is always invoked inside the
    rep loop, with no pre-computation of data outside the loop.
 3. Thread randomness explicitly — the `rng` argument controls both stochastic
