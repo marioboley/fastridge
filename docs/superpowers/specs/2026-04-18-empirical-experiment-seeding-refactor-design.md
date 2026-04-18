@@ -4,11 +4,10 @@
 
 Refactor `EmpiricalDataProblem` and `EmpiricalDataExperiment` to:
 
-1. Unify the problem interface — rename `get_X_y` to `rvs` so both
-   `EmpiricalDataProblem` and `linear_problem` share the same calling convention
-   `rvs(n, rng=rng)`, with `EmpiricalDataProblem.rvs` returning a train/test split
-   when `n_train` is given.
-2. Unify the call site — `rvs(n_train, rng=rng)` is always invoked inside the
+1. Extend `get_X_y` with `n_train` and `rng` parameters — the method now returns
+   `(X_train, X_test, y_train, y_test)` instead of `(X, y)`, incorporating the
+   train/test split and zero-variance filter previously done in the experiment runner.
+2. Unify the call site — `get_X_y(n_train, rng=rng)` is always invoked inside the
    rep loop, with no pre-computation of data outside the loop.
 3. Thread randomness explicitly — the `rng` argument controls both stochastic
    x_transforms (e.g. `PolynomialExpansion` column subsampling) and the train/test
@@ -16,10 +15,10 @@ Refactor `EmpiricalDataProblem` and `EmpiricalDataExperiment` to:
 4. Support legacy and modern numpy seeding — `rng=None` falls back to global state
    (controlled via `np.random.seed`); an explicit `Generator` uses the modern API.
 5. Support all seed scopes — trial, series, experiment — and seed progressions —
-   fixed, sequential — by varying only which `rng` is passed to `rvs`.
+   fixed, sequential — by varying only which `rng` is passed to `get_X_y`.
 6. Align `EmpiricalDataExperiment` with `Experiment` — replace `test_prop` and
    `n_iterations` with `ns` (integer matrix) and `reps`, matching the existing
-   parameter names — as a step toward eventual unification.
+   parameter names.
 
 ---
 
@@ -41,20 +40,16 @@ requires `n_train` as a first-class integer known before the trial loop and
 
 ---
 
-## `EmpiricalDataProblem.rvs`
+## `EmpiricalDataProblem.get_X_y`
 
 ### New signature
 
 ```python
-def rvs(self, n_train=None, rng=None):
+def get_X_y(self, n_train, rng=None):
 ```
 
-`get_X_y` is renamed to `rvs`. The old name is removed with no deprecation period —
-usage is fully internal (experiment runners and notebooks in this repository).
-
-### Behaviour when `n_train` is given (primary path)
-
-Returns `(X_train, X_test, y_train, y_test)`.
+`n_train` is now required. Return type changes from `(X, y)` to
+`(X_train, X_test, y_train, y_test)`.
 
 Internal pipeline:
 
@@ -69,17 +64,11 @@ Internal pipeline:
    both `X_train` and `X_test` to `non_zero` columns (zero-variance filter,
    currently in the experiment runner).
 
-### Behaviour when `n_train` is `None` (backward-compat path)
-
-Returns `(X, y)` — full data, no split, no zero-variance filter. Transforms are
-still applied with `rng=rng`. Existing doctests and notebook cells that call
-`get_X_y()` must be updated to call `rvs()`.
-
 ### rng semantics
 
 `rng=None` passes `None` to both transforms and `train_test_split`, meaning numpy
 global state governs all randomness. When `np.random.seed(seed)` has been called
-before `rvs`, the output is fully deterministic — this is the legacy path.
+before `get_X_y`, the output is fully deterministic — this is the legacy path.
 
 An explicit `np.random.Generator` is consumed sequentially: first by any stochastic
 x_transforms in list order, then by `train_test_split`. The caller is responsible
@@ -126,9 +115,6 @@ Notebooks that previously passed `test_prop=0.3` migrate to:
 ns = n_train_from_proportion(problems, 0.7)
 exp = EmpiricalDataExperiment(problems, estimators, reps, ns=ns, ...)
 ```
-
-This makes the per-problem n values explicit and visible at experiment-definition
-time rather than computed implicitly inside the runner.
 
 ---
 
@@ -179,8 +165,7 @@ def _set_seed(self, unit_idx):
 trial scope. `self.rng` is not set in `__init__` — it is a run-time attribute
 initialised to `None` at the start of `run()` and updated by `_set_seed` at each
 scope boundary. In legacy mode `_set_seed` seeds global state and leaves `self.rng`
-as `None`; the loop always passes `self.rng` to `rvs` unconditionally regardless of
-mode.
+as `None`; the loop always passes `self.rng` to `get_X_y` unconditionally.
 
 ### `run()` loop structure
 
@@ -202,7 +187,7 @@ def run(self, overwrite=False):
                 if self.seed_scope == 'trial':
                     self._set_seed(iter_idx)
 
-                X_train, X_test, y_train, y_test = problem.rvs(n_train, rng=self.rng)
+                X_train, X_test, y_train, y_test = problem.get_X_y(n_train, rng=self.rng)
 
                 for est_idx, est in enumerate(self.estimators):
                     _est = clone(est, safe=False)
@@ -246,13 +231,13 @@ This refactor is a prerequisite for result persistence. It establishes:
   the `<n_train>` path component in cache keys).
 - `seed_mode`, `seed_scope`, `seed_progression` on `EmpiricalDataExperiment`
   (required by the persistence spec's seeding section).
-- A single unconditional call site for `rvs` inside the rep loop (required
+- A single unconditional call site for `get_X_y` inside the rep loop (required
   for the per-trial and per-series cache granularities to map cleanly to the loop
   structure).
 
 ---
 
-## Path toward unification with `Experiment`
+## Alignment with `Experiment`
 
 After this refactor both classes share:
 
@@ -260,37 +245,24 @@ After this refactor both classes share:
 - `reps` for the number of repetitions.
 - Result arrays of shape `(reps, n_problems, n_sizes, n_estimators)`.
 - `seed_mode` / `seed_scope` / `seed_progression` parameters.
-- `rvs(n, rng)` as the problem interface — both `linear_problem` and
-  `EmpiricalDataProblem` now expose this name.
-
-The remaining structural difference is that `Experiment` calls `rvs(n, rng)` twice
-per iteration — once for training data, once for a fixed test set — while
-`EmpiricalDataExperiment` calls `rvs(n_train, rng)` once and receives a split.
-Full unification would require `linear_problem.rvs` to also accept a test split
-convention, which is out of scope here. The shared `ns`, `reps`, and seeding
-parameters are the necessary foundation for that future step.
 
 ---
 
 ## Files
 
 - **Modify** `experiments/problems.py`:
-  - Rename `EmpiricalDataProblem.get_X_y` to `rvs`; add `n_train`, `rng` params;
-    add split and zero-variance filter when `n_train` given; forward `rng` to
-    x_transforms.
+  - `EmpiricalDataProblem.get_X_y` — add `n_train`, `rng` params; add split and
+    zero-variance filter; forward `rng` to x_transforms. Update doctests.
   - `PolynomialExpansion.__call__` — add `rng=None`; use `rng.choice` when provided.
   - `OneHotEncodeCategories.__call__` — add `rng=None` (ignored).
   - Add `n_train_from_proportion` helper.
-  - Update all `get_X_y()` calls in doctests to `rvs()`.
 
 - **Modify** `experiments/experiments.py`:
   - `EmpiricalDataExperiment.__init__` — replace `test_prop` / `n_iterations` with
     `ns` / `reps`; add `seed_mode`, `seed_scope`, `seed_progression`.
-  - `EmpiricalDataExperiment.__init__` — initialise `self.rng = None`.
-  - `EmpiricalDataExperiment.run` — restructure loop; move zero-variance filter
-    into `rvs`; add `_set_seed` class method.
-  - Update docstring example (currently calls with `n_iterations=`, `seed=`).
+  - `EmpiricalDataExperiment.run` — restructure loop; add `_set_seed` method;
+    remove zero-variance filter (now in `get_X_y`). Update docstring example.
 
 - **Modify** `experiments/real_data.ipynb` — replace `test_prop=0.3` /
   `n_iterations=` with `ns=n_train_from_proportion(problems, 0.7)` / `reps=`;
-  replace `get_X_y()` calls with `rvs()`; update imports.
+  update imports.
