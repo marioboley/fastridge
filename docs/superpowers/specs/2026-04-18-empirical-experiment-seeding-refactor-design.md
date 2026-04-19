@@ -5,11 +5,11 @@
 This refactoring enables fully reproducible empirical data experiments that are
 transparently described to allow the subsequent persistence refactoring (see
 [result persistence design](2026-04-16-result-persistence-design.md)) and flexible
-enough to eventually unify experiment runners. As secondary effects it modernises
-the code by using the modern numpy random number API with explicit generator objects
-instead of the legacy procedural API, and it continues enforcing defined
-responsibility boundaries by moving concrete data processing out of the experiment
-runner.
+enough to retain legacy experiment behaviour as well as to eventually unify experiment
+runners. As secondary effects it modernises the code by using the modern numpy random
+number API with explicit generator objects instead of the legacy procedural API, and
+it continues enforcing defined responsibility boundaries by moving concrete data
+processing out of the experiment runner.
 
 To achieve this, refactor `EmpiricalDataProblem` and `EmpiricalDataExperiment` to:
 
@@ -58,6 +58,25 @@ requires `n_train` as a first-class integer known before the trial loop and
 
 ## `EmpiricalDataProblem.get_X_y`
 
+### sklearn `train_test_split` is not used for splitting
+
+The long term goal to unify experiment runners dictates support of 
+`np.random.Generator`. However, `sklearn.model_selection.train_test_split` rejects
+`np.random.Generator` via strict parameter validation (sklearn 1.8). Passing a 
+`Generator` raises `InvalidParameterError`. Only `int`, `RandomState`, or `None`
+are accepted.
+
+Rather than branching on rng type, the split is implemented directly using the
+same algorithm sklearn uses internally: `rng.permutation(n)`. Inspection of
+`sklearn.model_selection._split.ShuffleSplit._iter_indices` confirms that this is
+exactly what sklearn calls on its `random_state` argument. Both `Generator` and
+`RandomState` expose `.permutation()` with the same semantics.
+
+This means: for the MT19937 / `RandomState` path, the split produced by
+`rng.permutation(n)` is numerically identical to what `train_test_split` would
+produce with `random_state=rng`. Legacy equivalence is preserved. No sklearn
+import is needed in `problems.py` for the split step.
+
 ### New signature
 
 ```python
@@ -74,9 +93,13 @@ Internal pipeline:
 3. Split X / y.
 4. Apply y_transforms (deterministic; `rng` not forwarded).
 5. Apply each x_transform as `fn(X, rng)` — see x_transform protocol below.
-6. Call `sklearn.model_selection.train_test_split(X, y, train_size=n_train,
-   random_state=rng)` — `random_state` accepts a `Generator`, `RandomState`, or
-   `None`.
+6. Split train/test via permutation:
+   ```python
+   n_test = len(X) - n_train
+   indices = rng.permutation(len(X))
+   X_train, X_test = X.iloc[indices[n_test:]], X.iloc[indices[:n_test]]
+   y_train, y_test = y.iloc[indices[n_test:]], y.iloc[indices[:n_test]]
+   ```
 7. If `self.zero_variance_filter` is `True`: compute `std = X_train.std();
    non_zero = std[std != 0].index` and restrict both `X_train` and `X_test` to
    `non_zero` columns.
@@ -116,14 +139,11 @@ results: although both use the MT19937 engine, they apply different sampling
 algorithms and produce different numbers from the same seed.
 
 After normalization `rng` is either a `Generator` or a `RandomState`. Both expose
-`.choice()`, satisfying the x_transform protocol. Both are accepted by
-`train_test_split` via its `random_state` parameter: `RandomState` support is
-long-standing and documented; `Generator` support was added in sklearn 1.2 and is
-not reflected in the official API reference as of 1.8. This codebase requires
-sklearn >= 1.2.
+`.choice()` and `.permutation()`, satisfying the x_transform protocol and the
+split step respectively.
 
 The normalized rng is consumed sequentially within `get_X_y`: first by any
-stochastic x_transforms in list order, then by `train_test_split`.
+stochastic x_transforms in list order, then by the permutation split.
 
 ---
 
@@ -139,8 +159,8 @@ routinely pass None or an integer seed. Normalization at the top of the method
 collapses these to Generator or RandomState before anything else runs. After that
 point the rng is always one of those two types for the remainder of the call.
 
-Transforms (`__call__`) and `train_test_split` are internal consumers. They receive
-an already-typed rng from `get_X_y` and can rely on it being Generator or
+Transforms (`__call__`) and the permutation split step are internal consumers. They
+receive an already-typed rng from `get_X_y` and can rely on it being Generator or
 RandomState — never None, never int. No normalization is needed or performed inside
 these consumers.
 
@@ -341,8 +361,9 @@ alignment is deferred to a future refactor of `Experiment`.
 ## Files
 
 - **Modify** `experiments/problems.py`:
-  - `EmpiricalDataProblem.get_X_y` — add `n_train`, `rng` params; add split;
-    add conditional zero-variance filter; forward `rng` to x_transforms. Update doctests.
+  - `EmpiricalDataProblem.get_X_y` — add `n_train`, `rng` params; normalize rng
+    at entry; split via `rng.permutation` (not `train_test_split`); add
+    conditional zero-variance filter; forward `rng` to x_transforms. Update doctests.
   - `EmpiricalDataProblem.__init__` — add `zero_variance_filter=False`; include in
     `__repr__` only when `True`.
   - `NEURIPS2023`, `NEURIPS2023_D2`, `NEURIPS2023_D3` — add `zero_variance_filter=True`
