@@ -4,7 +4,7 @@
 
 **Goal:** Refactor `EmpiricalDataProblem.get_X_y` and `EmpiricalDataExperiment` to thread explicit generator objects through the data pipeline, enabling reproducible seeding at configurable scopes and a stable `n_train` value before the trial loop.
 
-**Architecture:** `get_X_y(n_train, rng)` absorbs the train/test split and optional zero-variance filter; the experiment runner creates generator objects via `_make_rng` and passes them down. x_transforms gain an `rng=None` keyword so stochastic transforms (e.g. `PolynomialExpansion` subsampling) consume the same generator as the split. `EmpiricalDataExperiment` replaces `test_prop`/`n_iterations` with `ns`/`reps` and adds `generator`, `seed_scope`, `seed_progression` to control seeding granularity.
+**Architecture:** `get_X_y(n_train, rng)` absorbs the train/test split and optional zero-variance filter; the experiment runner creates generator objects via `_make_rng` and passes them down. `get_X_y` is the single normalization boundary — it accepts None/int/Generator/RandomState and normalizes to Generator or RandomState before forwarding. x_transforms receive a required `rng` argument (always typed Generator or RandomState) so stochastic transforms (e.g. `PolynomialExpansion` subsampling) consume the same generator as the split. `EmpiricalDataExperiment` replaces `test_prop`/`n_iterations` with `ns`/`reps` and adds `generator`, `seed_scope`, `seed_progression` to control seeding granularity.
 
 **Tech Stack:** numpy (`np.random.Generator`, `np.random.PCG64`, `np.random.RandomState`), sklearn `train_test_split`, pytest doctests + unit tests.
 
@@ -25,7 +25,7 @@ docstrings.
 
 | File | Changes |
 |------|---------|
-| `experiments/problems.py` | Add `rng=None` to `PolynomialExpansion.__call__` and `OneHotEncodeCategories.__call__`; add `zero_variance_filter` to `EmpiricalDataProblem`; refactor `get_X_y`; add `n_train_from_proportion`; update NEURIPS2023 sets |
+| `experiments/problems.py` | Add required `rng` parameter to `PolynomialExpansion.__call__` and `OneHotEncodeCategories.__call__`; add `zero_variance_filter` to `EmpiricalDataProblem`; refactor `get_X_y` with normalization at entry; add `n_train_from_proportion`; update NEURIPS2023 sets |
 | `experiments/experiments.py` | Replace `EmpiricalDataExperiment` constructor and `run()`; add `_RNG_FACTORIES` and `_make_rng` |
 | `experiments/real_data.ipynb` | Update imports and all `EmpiricalDataExperiment` call sites |
 | `experiments/real_data_neurips2023.ipynb` | Update all `EmpiricalDataExperiment` call sites |
@@ -81,7 +81,7 @@ docstrings.
   Replace the current `__call__` method:
 
   ```python
-  def __call__(self, X, rng=None):
+  def __call__(self, X, rng):
       poly = PolynomialFeatures(degree=self.degree, include_bias=False)
       X_poly = pd.DataFrame(
           poly.fit_transform(X),
@@ -94,8 +94,7 @@ docstrings.
           interaction_cols = [c for c in X_poly.columns if c not in linear_cols]
           p_budget = int(np.ceil(self.max_entries / n))
           pnew = max(0, min(len(interaction_cols), p_budget - len(linear_cols)))
-          _rng = rng or np.random.default_rng()
-          sampled = sorted(_rng.choice(len(interaction_cols), size=pnew, replace=False))
+          sampled = sorted(rng.choice(len(interaction_cols), size=pnew, replace=False))
           return X_poly[linear_cols + [interaction_cols[i] for i in sampled]]
       return X_poly
   ```
@@ -105,7 +104,7 @@ docstrings.
   Change only the signature line (body unchanged):
 
   ```python
-  def __call__(self, X, rng=None):
+  def __call__(self, X, rng):
   ```
 
 - [ ] **Step 5: Run tests to verify both pass**
@@ -329,7 +328,25 @@ docstrings.
       >>> X_train_ohe, _, _, _ = ohe.get_X_y(100)
       >>> 'fuel-type_gas' in X_train_ohe.columns
       True
+
+      zero_variance_filter drops constant columns from both train and test:
+
+      >>> p = EmpiricalDataProblem('crime', 'ViolentCrimesPerPop',
+      ...     drop=['state', 'fold', 'communityname'], nan_policy='drop_cols')
+      >>> p_zvf = EmpiricalDataProblem('crime', 'ViolentCrimesPerPop',
+      ...     drop=['state', 'fold', 'communityname'], nan_policy='drop_cols',
+      ...     zero_variance_filter=True)
+      >>> Xtr, _, _, _ = p.get_X_y(1000, rng=np.random.default_rng(0))
+      >>> Xtr_f, _, _, _ = p_zvf.get_X_y(1000, rng=np.random.default_rng(0))
+      >>> Xtr_f.shape[1] < Xtr.shape[1]
+      True
   ```
+
+  **Note for implementer:** before finalising this doctest, verify that `crime` with
+  `nan_policy='drop_cols'`, `n_train=1000`, and `rng=np.random.default_rng(0)` actually
+  produces at least one zero-variance training column. If not, find a dataset/seed/n_train
+  combination that does and substitute it. The intent is to show the filter removing a
+  real constant column, not just a no-op call.
 
 - [ ] **Step 5: Implement the new `get_X_y`**
 
@@ -337,6 +354,8 @@ docstrings.
 
   ```python
   def get_X_y(self, n_train, rng=None):
+      if not isinstance(rng, np.random.RandomState):
+          rng = np.random.default_rng(rng)
       df = get_dataset(self.dataset)
       missing = [c for c in self.drop if c not in df.columns]
       if missing:
@@ -353,7 +372,7 @@ docstrings.
       for fn in self.y_transforms:
           y = fn(y)
       for fn in self.x_transforms:
-          X = fn(X, rng=rng)
+          X = fn(X, rng)
       X_train, X_test, y_train, y_test = train_test_split(
           X, y, train_size=n_train, random_state=rng)
       if self.zero_variance_filter:
