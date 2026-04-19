@@ -32,9 +32,11 @@ class EmpiricalDataProblem:
         target is NaN. 'drop_rows' drops any row with a NaN; 'drop_cols'
         drops any column with a NaN. None (default) leaves NaNs in place.
     x_transforms : list of callable, optional
-        Ordered sequence of ``DataFrame -> DataFrame`` transforms applied to
-        X after the X/y split. ``OneHotEncodeCategories`` and
-        ``PolynomialExpansion`` satisfy this contract.
+        Ordered sequence of callables with signature ``(X, rng)`` applied to
+        X after the X/y split. ``rng`` is always a ``Generator`` or
+        ``RandomState``; deterministic transforms may ignore it.
+        ``OneHotEncodeCategories`` and ``PolynomialExpansion`` satisfy this
+        contract.
     y_transforms : list of callable, optional
         Ordered sequence of ``Series -> Series`` transforms applied to y
         after the X/y split. Numpy ufuncs (``np.log``, ``np.log1p``) satisfy
@@ -194,9 +196,10 @@ class PolynomialExpansion:
     >>> import numpy as np
     >>> X = pd.DataFrame({'a': [1.0, 2.0, 3.0], 'b': [4.0, 5.0, 6.0]})
     >>> pe = PolynomialExpansion(2)
-    >>> list(pe(X).columns)
+    >>> rng = np.random.default_rng(0)
+    >>> list(pe(X, rng).columns)
     ['a', 'b', 'a^2', 'a b', 'b^2']
-    >>> pe(X).shape
+    >>> pe(X, rng).shape
     (3, 5)
     >>> PolynomialExpansion(2) == PolynomialExpansion(2)
     True
@@ -211,7 +214,7 @@ class PolynomialExpansion:
 
     With subsampling: total columns = ceil(max_entries / n).
     >>> small = PolynomialExpansion(2, max_entries=9)
-    >>> result = small(X)
+    >>> result = small(X, np.random.default_rng(0))
     >>> result.shape[1]
     3
     >>> 'a' in result.columns and 'b' in result.columns
@@ -222,7 +225,7 @@ class PolynomialExpansion:
         self.degree = degree
         self.max_entries = max_entries
 
-    def __call__(self, X):
+    def __call__(self, X, rng):
         poly = PolynomialFeatures(degree=self.degree, include_bias=False)
         X_poly = pd.DataFrame(
             poly.fit_transform(X),
@@ -235,7 +238,7 @@ class PolynomialExpansion:
             interaction_cols = [c for c in X_poly.columns if c not in linear_cols]
             p_budget = int(np.ceil(self.max_entries / n))
             pnew = max(0, min(len(interaction_cols), p_budget - len(linear_cols)))
-            sampled = sorted(np.random.choice(len(interaction_cols), size=pnew, replace=False))
+            sampled = sorted(rng.choice(len(interaction_cols), size=pnew, replace=False))
             return X_poly[linear_cols + [interaction_cols[i] for i in sampled]]
         return X_poly
 
@@ -263,11 +266,12 @@ class OneHotEncodeCategories:
     --------
     >>> import pandas as pd
     >>> enc = OneHotEncodeCategories()
+    >>> rng = np.random.default_rng(0)
     >>> X_num = pd.DataFrame({'a': [1.0, 2.0], 'b': [3.0, 4.0]})
-    >>> enc(X_num).equals(X_num)
+    >>> enc(X_num, rng).equals(X_num)
     True
     >>> X_cat = pd.DataFrame({'color': ['red', 'blue', 'red'], 'size': [1.0, 2.0, 3.0]})
-    >>> result = enc(X_cat)
+    >>> result = enc(X_cat, rng)
     >>> 'color' in result.columns
     False
     >>> 'size' in result.columns
@@ -282,7 +286,7 @@ class OneHotEncodeCategories:
     'OneHotEncodeCategories()'
     """
 
-    def __call__(self, X):
+    def __call__(self, X, rng):
         cat_cols = [c for c in X.columns if not pd.api.types.is_numeric_dtype(X[c])]
         if not cat_cols:
             return X

@@ -1,0 +1,23 @@
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'experiments'))
+
+import numpy as np
+import pandas as pd
+import pytest
+from problems import PolynomialExpansion, OneHotEncodeCategories
+
+
+def test_polynomial_expansion_rng_deterministic():
+    X = pd.DataFrame({'a': [1.0, 2.0, 3.0], 'b': [4.0, 5.0, 6.0]})
+    small = PolynomialExpansion(2, max_entries=9)
+    rng1 = np.random.default_rng(0)
+    rng2 = np.random.default_rng(0)
+    assert list(small(X, rng1).columns) == list(small(X, rng2).columns)
+
+
+def test_one_hot_encode_accepts_rng():
+    X = pd.DataFrame({'a': [1.0, 2.0], 'b': [3.0, 4.0]})
+    enc = OneHotEncodeCategories()
+    result = enc(X, np.random.default_rng(0))
+    assert result.equals(X)
