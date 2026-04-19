@@ -518,36 +518,34 @@ NEURIPS2023_D3 = frozenset(
 )
 
 # Training set sizes (n_train = floor(0.7 * n_actual)) derived from actual
-# post-preprocessing row counts. Keyed by (dataset, target) and shared across
+# post-preprocessing row counts. Keyed by dataset name and shared across
 # NEURIPS2023, NEURIPS2023_D2, and NEURIPS2023_D3 (polynomial expansion does
-# not change row count).
+# not change row count; no dataset in these sets has differing n across targets).
 #
 # Deviations from floor(0.7 * DATASETS[dataset]['n']):
 #   automobile: actual n=159 after drop_rows (registry n=205) -> n_train=111 vs 143
 #   autompg:    actual n=392 after drop_rows (registry n=398) -> n_train=274 vs 278
 #   facebook:   actual n=499 after drop_rows (registry n=500) -> n_train=349 vs 350
 NEURIPS2023_TRAIN_SIZES = {
-    ('abalone',          'Rings'):                         2923,
-    ('airfoil',          'scaled-sound-pressure'):         1052,
-    ('automobile',       'price'):                          111,
-    ('autompg',          'mpg'):                            274,
-    ('blog',             'V281'):                         36677,
-    ('boston',           'medv'):                           354,
-    ('concrete',         'Concrete compressive strength'):  721,
-    ('crime',            'ViolentCrimesPerPop'):           1395,
-    ('ct_slices',        'reference'):                    37450,
-    ('diabetes',         'target'):                         309,
-    ('eye',              'y'):                               84,
-    ('facebook',         'Total Interactions'):             349,
-    ('forest',           'area'):                           361,
-    ('naval_propulsion', 'GT_compressor_decay'):           8353,
-    ('naval_propulsion', 'GT_turbine_decay'):              8353,
-    ('parkinsons',       'motor_UPDRS'):                   4112,
-    ('parkinsons',       'total_UPDRS'):                   4112,
-    ('real_estate',      'Y house price of unit area'):     289,
-    ('ribo',             'y'):                               49,
-    ('student',          'G3'):                             454,
-    ('tomshw',           'V97'):                          19725,
-    ('twitter',          'V78'):                         408275,
-    ('yacht',            'Residuary_resistance'):           215,
+    'abalone':          2923,
+    'airfoil':          1052,
+    'automobile':        111,
+    'autompg':           274,
+    'blog':            36677,
+    'boston':            354,
+    'concrete':          721,
+    'crime':            1395,
+    'ct_slices':       37450,
+    'diabetes':          309,
+    'eye':                84,
+    'facebook':          349,
+    'forest':            361,
+    'naval_propulsion': 8353,
+    'parkinsons':       4112,
+    'real_estate':       289,
+    'ribo':               49,
+    'student':           454,
+    'tomshw':          19725,
+    'twitter':        408275,
+    'yacht':             215,
 }
