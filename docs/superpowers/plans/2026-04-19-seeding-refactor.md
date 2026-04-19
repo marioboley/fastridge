@@ -4,9 +4,9 @@
 
 **Goal:** Refactor `EmpiricalDataProblem.get_X_y` and `EmpiricalDataExperiment` to thread explicit generator objects through the data pipeline, enabling reproducible seeding at configurable scopes and a stable `n_train` value before the trial loop.
 
-**Architecture:** `get_X_y(n_train, rng)` absorbs the train/test split and optional zero-variance filter; the experiment runner creates generator objects via `_make_rng` and passes them down. `get_X_y` is the single normalization boundary — it accepts None/int/Generator/RandomState and normalizes to Generator or RandomState before forwarding. x_transforms receive a required `rng` argument (always typed Generator or RandomState) so stochastic transforms (e.g. `PolynomialExpansion` subsampling) consume the same generator as the split. `EmpiricalDataExperiment` replaces `test_prop`/`n_iterations` with `ns`/`reps` and adds `generator`, `seed_scope`, `seed_progression` to control seeding granularity.
+**Architecture:** `get_X_y(n_train, rng)` absorbs the train/test split and optional zero-variance filter; the experiment runner creates generator objects via `_make_rng` and passes them down. `get_X_y` is the single normalization boundary — it accepts None/int/Generator/RandomState and normalizes to Generator or RandomState before forwarding. x_transforms receive a required `rng` argument (always typed Generator or RandomState) so stochastic transforms (e.g. `PolynomialExpansion` subsampling) consume the same generator as the split. The train/test split is implemented via `rng.permutation(len(X))` directly — sklearn's `train_test_split` is not used because sklearn 1.8 rejects `np.random.Generator` via strict parameter validation. Using `rng.permutation` directly replicates sklearn's internal algorithm and preserves exact legacy numerical equivalence for the `RandomState` path. `EmpiricalDataExperiment` replaces `test_prop`/`n_iterations` with `ns`/`reps` and adds `generator`, `seed_scope`, `seed_progression` to control seeding granularity.
 
-**Tech Stack:** numpy (`np.random.Generator`, `np.random.PCG64`, `np.random.RandomState`), sklearn `train_test_split`, pytest doctests + unit tests.
+**Tech Stack:** numpy (`np.random.Generator`, `np.random.PCG64`, `np.random.RandomState`), pytest, doctests + unit tests.
 
 **Spec:** `docs/superpowers/specs/2026-04-18-empirical-experiment-seeding-refactor-design.md`
 
@@ -25,7 +25,7 @@ docstrings.
 
 | File | Changes |
 |------|---------|
-| `experiments/problems.py` | Add required `rng` parameter to `PolynomialExpansion.__call__` and `OneHotEncodeCategories.__call__`; add `zero_variance_filter` to `EmpiricalDataProblem`; refactor `get_X_y` with normalization at entry; add `n_train_from_proportion`; update NEURIPS2023 sets |
+| `experiments/problems.py` | Add required `rng` parameter to `PolynomialExpansion.__call__` and `OneHotEncodeCategories.__call__`; add `zero_variance_filter` to `EmpiricalDataProblem`; refactor `get_X_y` with normalization at entry and permutation split; add `n_train_from_proportion`; update NEURIPS2023 sets |
 | `experiments/experiments.py` | Replace `EmpiricalDataExperiment` constructor and `run()`; add `_RNG_FACTORIES` and `_make_rng` |
 | `experiments/real_data.ipynb` | Update imports and all `EmpiricalDataExperiment` call sites |
 | `experiments/real_data_neurips2023.ipynb` | Update all `EmpiricalDataExperiment` call sites |
@@ -34,188 +34,34 @@ docstrings.
 
 ---
 
-## Task 1: Add `rng` parameter to x_transforms
+## Task 1: Add `rng` parameter to x_transforms ✅ COMPLETED
 
 **Files:**
 - Modify: `experiments/problems.py`
 - Create: `tests/test_problems.py`
 
-- [ ] **Step 1: Create `tests/test_problems.py` with a failing test**
-
-  ```python
-  import sys
-  import os
-  sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'experiments'))
-
-  import numpy as np
-  import pandas as pd
-  import pytest
-  from problems import PolynomialExpansion, OneHotEncodeCategories
-
-
-  def test_polynomial_expansion_rng_deterministic():
-      X = pd.DataFrame({'a': [1.0, 2.0, 3.0], 'b': [4.0, 5.0, 6.0]})
-      small = PolynomialExpansion(2, max_entries=9)
-      rng1 = np.random.default_rng(0)
-      rng2 = np.random.default_rng(0)
-      assert list(small(X, rng=rng1).columns) == list(small(X, rng=rng2).columns)
-
-
-  def test_one_hot_encode_accepts_rng():
-      X = pd.DataFrame({'a': [1.0, 2.0], 'b': [3.0, 4.0]})
-      enc = OneHotEncodeCategories()
-      result = enc(X, rng=np.random.default_rng(0))
-      assert result.equals(X)
-  ```
-
-- [ ] **Step 2: Run to verify tests fail**
-
-  ```bash
-  cd /Users/marioboley/Documents/GitHub/fastridge && python -m pytest tests/test_problems.py::test_polynomial_expansion_rng_deterministic tests/test_problems.py::test_one_hot_encode_accepts_rng -v
-  ```
-
-  Expected: FAIL — `__call__() takes 2 positional arguments but 3 were given`.
-
-- [ ] **Step 3: Update `PolynomialExpansion.__call__` in `experiments/problems.py`**
-
-  Replace the current `__call__` method:
-
-  ```python
-  def __call__(self, X, rng):
-      poly = PolynomialFeatures(degree=self.degree, include_bias=False)
-      X_poly = pd.DataFrame(
-          poly.fit_transform(X),
-          columns=poly.get_feature_names_out(X.columns),
-          index=X.index
-      )
-      n, p = X_poly.shape
-      if n * p > self.max_entries:
-          linear_cols = list(X.columns)
-          interaction_cols = [c for c in X_poly.columns if c not in linear_cols]
-          p_budget = int(np.ceil(self.max_entries / n))
-          pnew = max(0, min(len(interaction_cols), p_budget - len(linear_cols)))
-          sampled = sorted(rng.choice(len(interaction_cols), size=pnew, replace=False))
-          return X_poly[linear_cols + [interaction_cols[i] for i in sampled]]
-      return X_poly
-  ```
-
-- [ ] **Step 4: Update `OneHotEncodeCategories.__call__` signature**
-
-  Change only the signature line (body unchanged):
-
-  ```python
-  def __call__(self, X, rng):
-  ```
-
-- [ ] **Step 5: Run tests to verify both pass**
-
-  ```bash
-  python -m pytest tests/test_problems.py::test_polynomial_expansion_rng_deterministic tests/test_problems.py::test_one_hot_encode_accepts_rng -v
-  ```
-
-  Expected: PASS.
-
-- [ ] **Step 6: Run existing doctests to confirm no regressions**
-
-  ```bash
-  python -m pytest --doctest-modules experiments/problems.py::problems.PolynomialExpansion experiments/problems.py::problems.OneHotEncodeCategories -v
-  ```
-
-  Expected: PASS.
-
-- [ ] **Step 7: Commit**
-
-  ```bash
-  git add experiments/problems.py tests/test_problems.py
-  git commit -m "feat: add rng parameter to PolynomialExpansion and OneHotEncodeCategories"
-  ```
+- [x] **Step 1: Create `tests/test_problems.py` with a failing test**
+- [x] **Step 2: Run to verify tests fail**
+- [x] **Step 3: Update `PolynomialExpansion.__call__` in `experiments/problems.py`**
+- [x] **Step 4: Update `OneHotEncodeCategories.__call__` signature**
+- [x] **Step 5: Run tests to verify both pass**
+- [x] **Step 6: Run existing doctests to confirm no regressions**
+- [x] **Step 7: Commit** (`feat: add rng parameter to PolynomialExpansion and OneHotEncodeCategories`)
 
 ---
 
-## Task 2: Add `zero_variance_filter` to `EmpiricalDataProblem`
+## Task 2: Add `zero_variance_filter` to `EmpiricalDataProblem` ✅ COMPLETED
 
 **Files:**
 - Modify: `experiments/problems.py`
 - Modify: `tests/test_problems.py`
 
-- [ ] **Step 1: Add a failing test to `tests/test_problems.py`**
-
-  ```python
-  from problems import EmpiricalDataProblem
-
-
-  def test_zero_variance_filter_default_false():
-      assert EmpiricalDataProblem('diabetes', 'target').zero_variance_filter is False
-
-
-  def test_zero_variance_filter_in_repr_only_when_true():
-      assert 'zero_variance_filter' not in repr(EmpiricalDataProblem('diabetes', 'target'))
-      assert repr(EmpiricalDataProblem('diabetes', 'target', zero_variance_filter=True)) == \
-          "EmpiricalDataProblem('diabetes', 'target', zero_variance_filter=True)"
-
-
-  def test_zero_variance_filter_affects_equality():
-      p_false = EmpiricalDataProblem('diabetes', 'target')
-      p_true = EmpiricalDataProblem('diabetes', 'target', zero_variance_filter=True)
-      assert p_false == EmpiricalDataProblem('diabetes', 'target', zero_variance_filter=False)
-      assert p_false != p_true
-  ```
-
-- [ ] **Step 2: Run to verify they fail**
-
-  ```bash
-  python -m pytest tests/test_problems.py::test_zero_variance_filter_default_false tests/test_problems.py::test_zero_variance_filter_in_repr_only_when_true tests/test_problems.py::test_zero_variance_filter_affects_equality -v
-  ```
-
-  Expected: FAIL — `__init__() got an unexpected keyword argument 'zero_variance_filter'`.
-
-- [ ] **Step 3: Add `zero_variance_filter` to `EmpiricalDataProblem.__init__`**
-
-  Replace the `__init__` signature and `_repr` construction:
-
-  ```python
-  def __init__(self, dataset, target, drop=None, nan_policy=None,
-               x_transforms=None, y_transforms=None, zero_variance_filter=False):
-      self.dataset = dataset
-      self.target = target
-      self.drop = tuple(drop or [])
-      self.nan_policy = nan_policy
-      self.x_transforms = tuple(x_transforms or [])
-      self.y_transforms = tuple(y_transforms or [])
-      self.zero_variance_filter = zero_variance_filter
-      self._repr = (
-          f'EmpiricalDataProblem({self.dataset!r}, {self.target!r}'
-          + (f', drop={list(self.drop)!r}' if self.drop else '')
-          + (f', nan_policy={self.nan_policy!r}' if self.nan_policy else '')
-          + (f', x_transforms={list(self.x_transforms)!r}' if self.x_transforms else '')
-          + (f', y_transforms={list(self.y_transforms)!r}' if self.y_transforms else '')
-          + (', zero_variance_filter=True' if self.zero_variance_filter else '')
-          + ')'
-      )
-  ```
-
-- [ ] **Step 4: Run to verify tests pass**
-
-  ```bash
-  python -m pytest tests/test_problems.py -k "zero_variance_filter" -v
-  ```
-
-  Expected: PASS.
-
-- [ ] **Step 5: Run existing `EmpiricalDataProblem` doctests to confirm no regressions**
-
-  ```bash
-  python -m pytest --doctest-modules experiments/problems.py::problems.EmpiricalDataProblem -v
-  ```
-
-  Expected: PASS.
-
-- [ ] **Step 6: Commit**
-
-  ```bash
-  git add experiments/problems.py tests/test_problems.py
-  git commit -m "feat: add zero_variance_filter parameter to EmpiricalDataProblem"
-  ```
+- [x] **Step 1: Add failing tests to `tests/test_problems.py`**
+- [x] **Step 2: Run to verify they fail**
+- [x] **Step 3: Add `zero_variance_filter` to `EmpiricalDataProblem.__init__`**
+- [x] **Step 4: Run to verify tests pass**
+- [x] **Step 5: Run existing `EmpiricalDataProblem` doctests to confirm no regressions**
+- [x] **Step 6: Commit** (`feat: add zero_variance_filter parameter to EmpiricalDataProblem`)
 
 ---
 
@@ -225,67 +71,80 @@ docstrings.
 - Modify: `experiments/problems.py`
 - Modify: `tests/test_problems.py`
 
-- [ ] **Step 1: Add `train_test_split` import to `experiments/problems.py`**
+- [ ] **Step 1: Remove `train_test_split` import from `experiments/problems.py`**
 
-  Add alongside existing sklearn imports:
+  The split is now implemented directly via `rng.permutation`. Remove this line:
 
   ```python
   from sklearn.model_selection import train_test_split
   ```
 
-- [ ] **Step 2: Add failing unit tests**
+  sklearn is still needed for `PolynomialFeatures` and `OneHotEncoder` — only the
+  `train_test_split` import is removed.
+
+- [ ] **Step 2: Add failing unit tests to `tests/test_problems.py`**
 
   ```python
   def test_get_X_y_returns_four_tuple_with_correct_sizes():
       prob = EmpiricalDataProblem('diabetes', 'target')
       X_train, X_test, y_train, y_test = prob.get_X_y(300)
-      assert X_train.shape == (300, 10)
-      assert X_test.shape == (142, 10)
+      assert X_train.shape[0] == 300
+      assert X_train.shape[1] == 10
       assert len(y_train) == 300
-      assert len(y_test) == 142
+      assert len(y_test) == X_test.shape[0]
 
 
   def test_get_X_y_seeded_reproducible():
       prob = EmpiricalDataProblem('diabetes', 'target')
-      Xtr1, _, _, _ = prob.get_X_y(300, rng=np.random.default_rng(0))
-      Xtr2, _, _, _ = prob.get_X_y(300, rng=np.random.default_rng(0))
+      Xtr1, _, _, _ = prob.get_X_y(300, rng=0)
+      Xtr2, _, _, _ = prob.get_X_y(300, rng=0)
       assert list(Xtr1.index) == list(Xtr2.index)
 
 
-  def test_get_X_y_zero_variance_filter_applied():
-      # crime dataset has zero-variance columns after splitting — use it to test filtering
-      prob_no_filter = EmpiricalDataProblem(
-          'crime', 'ViolentCrimesPerPop',
-          drop=['state', 'fold', 'communityname'], nan_policy='drop_cols')
-      prob_filter = EmpiricalDataProblem(
-          'crime', 'ViolentCrimesPerPop',
-          drop=['state', 'fold', 'communityname'], nan_policy='drop_cols',
-          zero_variance_filter=True)
-      rng = np.random.default_rng(1)
-      Xtr_no, Xte_no, _, _ = prob_no_filter.get_X_y(1000, rng=np.random.default_rng(1))
-      Xtr_f, Xte_f, _, _ = prob_filter.get_X_y(1000, rng=np.random.default_rng(1))
-      # filter should not increase column count
-      assert Xtr_f.shape[1] <= Xtr_no.shape[1]
-      # train and test must have matching columns
-      assert list(Xtr_f.columns) == list(Xte_f.columns)
-  ```
+  def test_get_X_y_zero_variance_filter_removes_constant_columns():
+      prob_no = EmpiricalDataProblem('naval_propulsion', 'GT_compressor_decay',
+                                     drop=['GT_turbine_decay'])
+      prob_filt = EmpiricalDataProblem('naval_propulsion', 'GT_compressor_decay',
+                                       drop=['GT_turbine_decay'],
+                                       zero_variance_filter=True)
+      Xtr_no, Xte_no, _, _ = prob_no.get_X_y(50, rng=0)
+      Xtr_f, Xte_f, _, _ = prob_filt.get_X_y(50, rng=0)
+      std = Xtr_no.std()
+      zero_var = std[std == 0].index.tolist()
+      assert len(zero_var) > 0, "test requires at least one zero-variance train column"
+      expected_cols = [c for c in Xtr_no.columns if c not in zero_var]
+      assert list(Xtr_f.columns) == expected_cols
+      assert list(Xte_f.columns) == expected_cols
 
-  Note: if `crime` turns out not to have zero-variance columns at this split size, use a
-  split where one of the numeric columns becomes constant, or verify by inspection during
-  implementation and substitute a dataset that does exhibit this behavior.
+
+  def test_get_X_y_rng_threading_to_transforms():
+      prob = EmpiricalDataProblem.__new__(EmpiricalDataProblem)
+      prob.dataset = 'diabetes'
+      prob.target = 'target'
+      prob.drop = ()
+      prob.nan_policy = None
+      prob.x_transforms = (PolynomialExpansion(2, max_entries=50),)
+      prob.y_transforms = ()
+      prob.zero_variance_filter = False
+      prob._repr = ''
+      Xtr1, _, _, _ = prob.get_X_y(50, rng=1)
+      Xtr2, _, _, _ = prob.get_X_y(50, rng=1)
+      assert list(Xtr1.columns) == list(Xtr2.columns)
+  ```
 
 - [ ] **Step 3: Run to verify they fail**
 
   ```bash
-  python -m pytest tests/test_problems.py::test_get_X_y_returns_four_tuple_with_correct_sizes tests/test_problems.py::test_get_X_y_seeded_reproducible tests/test_problems.py::test_get_X_y_zero_variance_filter_applied -v
+  cd /Users/marioboley/Documents/GitHub/fastridge && python -m pytest tests/test_problems.py::test_get_X_y_returns_four_tuple_with_correct_sizes tests/test_problems.py::test_get_X_y_seeded_reproducible tests/test_problems.py::test_get_X_y_zero_variance_filter_removes_constant_columns tests/test_problems.py::test_get_X_y_rng_threading_to_transforms -v
   ```
 
   Expected: FAIL — `get_X_y() missing required argument 'n_train'` or unpacking error.
 
-- [ ] **Step 4: Replace the existing `get_X_y` doctests**
+- [ ] **Step 4: Update the `get_X_y` doctest in `EmpiricalDataProblem`**
 
-  In the `EmpiricalDataProblem` docstring replace all existing `get_X_y` call examples
-  (the `>>> X, y = ...` lines and their output lines) with these minimal usage examples:
+  Replace all existing `get_X_y` call examples in the class docstring with these
+  (note the `zero_variance_filter` example uses `naval_propulsion` with `n_train=50`,
+  which reliably produces zero-variance columns `['T1', 'P1']` at `rng=0`):
 
   ```python
       Basic usage — returns (X_train, X_test, y_train, y_test):
@@ -304,7 +163,7 @@ docstrings.
       >>> X_train.shape[1]
       5
 
-      NaN handling — drop rows:
+      NaN handling:
 
       >>> auto = EmpiricalDataProblem('automobile', 'price', nan_policy='drop_rows')
       >>> X_train, _, _, _ = auto.get_X_y(100)
@@ -315,9 +174,9 @@ docstrings.
 
       >>> diabetes_log = EmpiricalDataProblem('diabetes', 'target',
       ...                                     y_transforms=[np.log])
-      >>> _, _, y_train_log, _ = diabetes_log.get_X_y(300, rng=np.random.default_rng(0))
-      >>> _, _, y_train_base, _ = diabetes.get_X_y(300, rng=np.random.default_rng(0))
-      >>> np.allclose(y_train_log.values, np.log(y_train_base.values))
+      >>> _, _, y_log, _ = diabetes_log.get_X_y(300, rng=0)
+      >>> _, _, y_base, _ = diabetes.get_X_y(300, rng=0)
+      >>> np.allclose(y_log.values, np.log(y_base.values))
       True
 
       x_transforms:
@@ -329,28 +188,32 @@ docstrings.
       >>> 'fuel-type_gas' in X_train_ohe.columns
       True
 
-      zero_variance_filter drops constant columns from both train and test:
+      zero_variance_filter drops constant train columns from both splits:
 
-      >>> p = EmpiricalDataProblem('crime', 'ViolentCrimesPerPop',
-      ...     drop=['state', 'fold', 'communityname'], nan_policy='drop_cols')
-      >>> p_zvf = EmpiricalDataProblem('crime', 'ViolentCrimesPerPop',
-      ...     drop=['state', 'fold', 'communityname'], nan_policy='drop_cols',
-      ...     zero_variance_filter=True)
-      >>> Xtr, _, _, _ = p.get_X_y(1000, rng=np.random.default_rng(0))
-      >>> Xtr_f, _, _, _ = p_zvf.get_X_y(1000, rng=np.random.default_rng(0))
-      >>> Xtr_f.shape[1] < Xtr.shape[1]
+      >>> naval = EmpiricalDataProblem('naval_propulsion', 'GT_compressor_decay',
+      ...     drop=['GT_turbine_decay'])
+      >>> naval_filt = EmpiricalDataProblem('naval_propulsion', 'GT_compressor_decay',
+      ...     drop=['GT_turbine_decay'], zero_variance_filter=True)
+      >>> Xtr, _, _, _ = naval.get_X_y(50, rng=0)
+      >>> std = Xtr.std()
+      >>> zero_var = std[std == 0].index.tolist()
+      >>> zero_var
+      ['T1', 'P1']
+      >>> Xtr_f, Xte_f, _, _ = naval_filt.get_X_y(50, rng=0)
+      >>> list(Xtr_f.columns) == [c for c in Xtr.columns if c not in zero_var]
+      True
+      >>> list(Xte_f.columns) == list(Xtr_f.columns)
       True
   ```
 
-  **Note for implementer:** before finalising this doctest, verify that `crime` with
-  `nan_policy='drop_cols'`, `n_train=1000`, and `rng=np.random.default_rng(0)` actually
-  produces at least one zero-variance training column. If not, find a dataset/seed/n_train
-  combination that does and substitute it. The intent is to show the filter removing a
-  real constant column, not just a no-op call.
-
 - [ ] **Step 5: Implement the new `get_X_y`**
 
-  Replace the existing method body:
+  Replace the existing method body. The split uses `rng.permutation(len(X))` for both
+  `Generator` and `RandomState` paths — this replicates the exact algorithm sklearn uses
+  internally in `ShuffleSplit._iter_indices`. For the `RandomState` path this produces
+  numerically identical splits to what `train_test_split(random_state=rng)` would produce,
+  preserving legacy equivalence. The index ordering matches sklearn: test indices come
+  first (`indices[:n_test]`), train indices second (`indices[n_test:]`).
 
   ```python
   def get_X_y(self, n_train, rng=None):
@@ -373,8 +236,12 @@ docstrings.
           y = fn(y)
       for fn in self.x_transforms:
           X = fn(X, rng)
-      X_train, X_test, y_train, y_test = train_test_split(
-          X, y, train_size=n_train, random_state=rng)
+      n_test = len(X) - n_train
+      indices = rng.permutation(len(X))
+      X_train = X.iloc[indices[n_test:]]
+      X_test  = X.iloc[indices[:n_test]]
+      y_train = y.iloc[indices[n_test:]]
+      y_test  = y.iloc[indices[:n_test]]
       if self.zero_variance_filter:
           std = X_train.std()
           non_zero = std[std != 0].index
@@ -429,7 +296,7 @@ docstrings.
       return np.array([int(DATASETS[p.dataset]['n'] * prop) for p in problems])
   ```
 
-  (diabetes has n=442 in the registry; 442*0.7=309.4 → 309; 442*0.8=353.6 → 353)
+  (diabetes has n=442 in the registry; 442*0.7=309.4 -> 309; 442*0.8=353.6 -> 353)
 
 - [ ] **Step 2: Run doctest**
 
