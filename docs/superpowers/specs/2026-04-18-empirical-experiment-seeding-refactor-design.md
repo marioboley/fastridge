@@ -95,15 +95,35 @@ must pass `zero_variance_filter=True` explicitly. The parameter is included in
 
 ### rng semantics
 
-The experiment runner always passes a non-None generator object (see `_make_rng`
-below). The `rng=None` default exists for external callers: x_transforms substitute
-`np.random.default_rng()` when `None` (non-deterministic but still modern API);
-`train_test_split` with `random_state=None` uses a random split.
+`get_X_y` accepts four rng types: `None`, `int`, `np.random.Generator`, and
+`np.random.RandomState`. At the top of the method, normalization collapses the
+first three to a `Generator` using numpy's own idempotent normalizer:
 
-An explicit generator object (either `np.random.Generator` or
-`np.random.RandomState`) is consumed sequentially: first by any stochastic
-x_transforms in list order, then by `train_test_split`. The caller is responsible
-for creating and advancing the generator.
+```python
+if not isinstance(rng, np.random.RandomState):
+    rng = np.random.default_rng(rng)
+    # None      -> randomly seeded PCG64 Generator (non-deterministic)
+    # int       -> seeded PCG64 Generator
+    # Generator -> same object (idempotent)
+```
+
+`RandomState` is the single exception and is passed through unchanged. It is never
+constructed by direct callers — it is only produced by `_make_rng` when
+`generator='MT19937'`, where it provides exact numerical equivalence to the legacy
+`np.random.seed` + `np.random.choice` path. Using
+`np.random.Generator(np.random.MT19937(seed))` instead would NOT reproduce legacy
+results: although both use the MT19937 engine, they apply different sampling
+algorithms and produce different numbers from the same seed.
+
+After normalization `rng` is either a `Generator` or a `RandomState`. Both expose
+`.choice()`, satisfying the x_transform protocol. Both are accepted by
+`train_test_split` via its `random_state` parameter: `RandomState` support is
+long-standing and documented; `Generator` support was added in sklearn 1.2 and is
+not reflected in the official API reference as of 1.8. This codebase requires
+sklearn >= 1.2.
+
+The normalized rng is consumed sequentially within `get_X_y`: first by any
+stochastic x_transforms in list order, then by `train_test_split`.
 
 ---
 
@@ -113,9 +133,10 @@ The documented contract for x_transforms changes from `fn(X)` to `fn(X, rng=None
 
 All built-in transforms are updated:
 
-- `PolynomialExpansion.__call__(self, X, rng=None)`: uses `(rng or np.random.default_rng()).choice`
-  — when `rng=None`, a fresh unseeded `Generator` is substituted, preserving the modern API
-  throughout. The experiment runner always provides an explicit rng.
+- `PolynomialExpansion.__call__(self, X, rng=None)`: applies the same normalization as
+  `get_X_y` — `np.random.default_rng(rng)` when `rng` is not a `RandomState` — then
+  calls `.choice()`. When `rng=None` a fresh unseeded Generator is substituted. The
+  experiment runner always provides an explicit rng.
 - `OneHotEncodeCategories.__call__(self, X, rng=None)`: accepts and ignores `rng`
   (deterministic).
 
