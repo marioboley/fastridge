@@ -73,7 +73,7 @@ Internal pipeline:
 2. Apply column drops, NaN policy, index reset — same as today.
 3. Split X / y.
 4. Apply y_transforms (deterministic; `rng` not forwarded).
-5. Apply each x_transform as `fn(X, rng=rng)` — see x_transform protocol below.
+5. Apply each x_transform as `fn(X, rng)` — see x_transform protocol below.
 6. Call `sklearn.model_selection.train_test_split(X, y, train_size=n_train,
    random_state=rng)` — `random_state` accepts a `Generator`, `RandomState`, or
    `None`.
@@ -127,21 +127,43 @@ stochastic x_transforms in list order, then by `train_test_split`.
 
 ---
 
+## RNG Flow
+
+`EmpiricalDataExperiment._make_rng` is the single producer of RNG objects. It always
+emits a fully typed object — either `np.random.Generator` (PCG64 path) or
+`np.random.RandomState` (MT19937 path). Never None, never int.
+
+`EmpiricalDataProblem.get_X_y` is the public boundary. It accepts four types
+(None, int, Generator, RandomState) because it is user-facing and direct callers
+routinely pass None or an integer seed. Normalization at the top of the method
+collapses these to Generator or RandomState before anything else runs. After that
+point the rng is always one of those two types for the remainder of the call.
+
+Transforms (`__call__`) and `train_test_split` are internal consumers. They receive
+an already-typed rng from `get_X_y` and can rely on it being Generator or
+RandomState — never None, never int. No normalization is needed or performed inside
+these consumers.
+
+---
+
 ## x_transform Protocol Extension
 
-The documented contract for x_transforms changes from `fn(X)` to `fn(X, rng=None)`.
+The documented contract for x_transforms changes from `fn(X)` to `fn(X, rng)`.
+
+`rng` is a required argument. When called from `get_X_y` it is always either
+`np.random.Generator` or `np.random.RandomState` — the transform can call
+`.choice()` unconditionally.
 
 All built-in transforms are updated:
 
-- `PolynomialExpansion.__call__(self, X, rng=None)`: applies the same normalization as
-  `get_X_y` — `np.random.default_rng(rng)` when `rng` is not a `RandomState` — then
-  calls `.choice()`. When `rng=None` a fresh unseeded Generator is substituted. The
-  experiment runner always provides an explicit rng.
-- `OneHotEncodeCategories.__call__(self, X, rng=None)`: accepts and ignores `rng`
+- `PolynomialExpansion.__call__(self, X, rng)`: calls `rng.choice()` directly. No
+  normalization — rng is always typed on entry.
+- `OneHotEncodeCategories.__call__(self, X, rng)`: accepts and ignores `rng`
   (deterministic).
 
-User-supplied x_transforms must also accept `rng=None`. Transforms that are purely
-deterministic can declare `def __call__(self, X, rng=None)` and ignore the argument.
+User-supplied x_transforms must accept a positional `rng` argument and may ignore it
+if deterministic. The argument will always be Generator or RandomState when called
+through `get_X_y`.
 
 y_transforms are unchanged — they remain single-argument callables.
 
@@ -325,8 +347,8 @@ alignment is deferred to a future refactor of `Experiment`.
     `__repr__` only when `True`.
   - `NEURIPS2023`, `NEURIPS2023_D2`, `NEURIPS2023_D3` — add `zero_variance_filter=True`
     to all problem instances to preserve existing behaviour.
-  - `PolynomialExpansion.__call__` — add `rng=None`; use `(rng or np.random.default_rng()).choice`.
-  - `OneHotEncodeCategories.__call__` — add `rng=None` (ignored).
+  - `PolynomialExpansion.__call__` — add required `rng` parameter; call `rng.choice()` directly (no normalization).
+  - `OneHotEncodeCategories.__call__` — add required `rng` parameter (ignored).
   - Add `n_train_from_proportion` helper.
 
 - **Modify** `experiments/experiments.py`:
