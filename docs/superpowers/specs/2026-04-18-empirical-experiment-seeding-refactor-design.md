@@ -302,6 +302,8 @@ alignment is deferred to a future refactor of `Experiment`.
     add conditional zero-variance filter; forward `rng` to x_transforms. Update doctests.
   - `EmpiricalDataProblem.__init__` — add `zero_variance_filter=False`; include in
     `__repr__` only when `True`.
+  - `NEURIPS2023`, `NEURIPS2023_D2`, `NEURIPS2023_D3` — add `zero_variance_filter=True`
+    to all problem instances to preserve existing behaviour.
   - `PolynomialExpansion.__call__` — add `rng=None`; use `(rng or np.random.default_rng()).choice`.
   - `OneHotEncodeCategories.__call__` — add `rng=None` (ignored).
   - Add `n_train_from_proportion` helper.
@@ -316,3 +318,5 @@ alignment is deferred to a future refactor of `Experiment`.
 - **Modify** `experiments/real_data.ipynb` — replace `test_prop=0.3` /
   `n_iterations=` with `ns=n_train_from_proportion(problems, 0.7)` / `reps=`;
   update imports.
+- **Modify** `experiments/real_data_neurips2023.ipynb` — same experiment runner
+  call site updates as `real_data.ipynb`.
