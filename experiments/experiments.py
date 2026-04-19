@@ -5,7 +5,6 @@ import pandas as pd
 from sklearn.base import clone
 from sklearn.linear_model import Ridge, LinearRegression
 from sklearn.metrics import mean_squared_error, r2_score
-from sklearn.model_selection import train_test_split
 from fastprogress.fastprogress import progress_bar
 
 
@@ -186,7 +185,6 @@ empirical_default_stats = [
     number_of_features,
 ]
 
-
 class Experiment:
 
     def __init__(self, problems, estimators, ns, reps, est_names=None, stats=default_stats,
@@ -275,33 +273,38 @@ class EmpiricalDataExperiment:
     """Run repeated train/test experiments on a list of EmpiricalDataProblem instances.
 
     Stores per-run results as numpy arrays of shape
-    ``(n_iterations, n_problems, 1, n_estimators)`` per metric, matching the
+    ``(reps, n_problems, n_sizes, n_estimators)`` per metric, matching the
     array layout of ``Experiment``. Failed runs (exception during fit) are
-    recorded as NaN and trigger a ``warnings.warn``. The seed is reset before
-    each problem's iteration loop so that each problem gets the same
-    deterministic split sequence regardless of list ordering.
+    recorded as NaN and trigger a ``warnings.warn``.
 
     Parameters
     ----------
     problems : list of EmpiricalDataProblem
     estimators : list of estimator objects
-    n_iterations : int
-    test_prop : float, default 0.3
+    reps : int
+    ns : array-like
+        Training set sizes. Broadcast to shape (n_problems, n_sizes).
+        Use n_train_from_proportion() to derive from the dataset registry.
     seed : int or None
+    generator : {'PCG64', 'MT19937'}, default 'PCG64'
+        'MT19937' uses np.random.RandomState for legacy numerical equivalence.
+    seed_scope : {'series', 'trial', 'experiment'}, default 'series'
+        When the seed is reset: per-problem, per-rep, or once for the run.
+    seed_progression : {'fixed', 'sequential'}, default 'fixed'
+        'fixed' reuses seed; 'sequential' uses seed + unit_idx.
     stats : list of metric callables or None
-        Each callable has signature ``(est, prob, x, y)``. Defaults to
-        ``empirical_default_stats``.
     est_names : list of str or None
-        Defaults to ``[str(e) for e in estimators]``.
     verbose : bool, default True
 
     Examples
     --------
     >>> from fastridge import RidgeEM
-    >>> from problems import EmpiricalDataProblem
-    >>> prob = EmpiricalDataProblem('diabetes', 'target')
+    >>> from problems import EmpiricalDataProblem, n_train_from_proportion
+    >>> prob = EmpiricalDataProblem('diabetes', 'target', zero_variance_filter=True)
+    >>> ns = n_train_from_proportion([prob])
     >>> exp = EmpiricalDataExperiment(
-    ...     [prob], [RidgeEM()], n_iterations=2, seed=1, verbose=False)
+    ...     [prob], [RidgeEM()], reps=2, ns=ns,
+    ...     seed=1, generator='MT19937', verbose=False)
     >>> exp.run().prediction_r2_.shape
     (2, 1, 1, 1)
     >>> exp.ns.shape
@@ -310,69 +313,84 @@ class EmpiricalDataExperiment:
     True
     """
 
-    def __init__(self, problems, estimators, n_iterations, test_prop=0.3,
-                 seed=None, stats=None, est_names=None,
-                 verbose=True):
+    _rng_factories = {
+        'PCG64':   lambda seed: np.random.Generator(np.random.PCG64(seed)),
+        'MT19937': lambda seed: np.random.RandomState(seed),
+    }
+
+    def __init__(self, problems, estimators, reps, ns,
+                 seed=None,
+                 generator='PCG64',
+                 seed_scope='series',
+                 seed_progression='fixed',
+                 stats=None, est_names=None, verbose=True):
         self.problems = problems
         self.estimators = estimators
-        self.n_iterations = n_iterations
-        self.test_prop = test_prop
+        self.reps = reps
+        self.ns = np.atleast_2d(ns)
+        if len(self.ns) != len(self.problems):
+            self.ns = self.ns.repeat(len(self.problems), axis=0)
         self.seed = seed
+        self.generator = generator
+        self.seed_scope = seed_scope
+        self.seed_progression = seed_progression
+        self._rng_factory = self._rng_factories[generator]
         self.stats = empirical_default_stats if stats is None else stats
         self.est_names = [str(e) for e in estimators] if est_names is None else est_names
         self.verbose = verbose
 
+    def _make_rng(self, unit_idx):
+        seed_val = None if self.seed is None else (
+            self.seed if self.seed_progression == 'fixed' else self.seed + unit_idx
+        )
+        return self._rng_factory(seed_val)
+
     def run(self):
         n_problems = len(self.problems)
         n_estimators = len(self.estimators)
+        n_sizes = len(self.ns[0])
 
         for stat in self.stats:
             self.__dict__[str(stat) + '_'] = np.full(
-                (self.n_iterations, n_problems, 1, n_estimators), np.nan)
-        self.ns = np.zeros((n_problems, 1), dtype=int)
+                (self.reps, n_problems, n_sizes, n_estimators), np.nan)
+
+        if self.seed_scope == 'experiment':
+            self.rng = self._make_rng(unit_idx=0)
 
         for prob_idx, problem in enumerate(self.problems):
-            X, y = problem.get_X_y()
-
             if self.verbose:
                 print(problem.dataset, end=' ')
 
-            self.ns[prob_idx, 0] = int(X.shape[0] * (1 - self.test_prop))
+            for n_idx, n_train in enumerate(self.ns[prob_idx]):
+                if self.seed_scope == 'series':
+                    self.rng = self._make_rng(unit_idx=prob_idx)
 
-            if self.verbose:
-                print(f'(n={X.shape[0]}, p={X.shape[1]})', end='')
+                for iter_idx in range(self.reps):
+                    if self.verbose:
+                        print('.', end='')
 
-            if self.seed is not None:
-                np.random.seed(self.seed)
+                    if self.seed_scope == 'trial':
+                        self.rng = self._make_rng(unit_idx=iter_idx)
 
-            for iter_idx in range(self.n_iterations):
-                if self.verbose:
-                    print('.', end='')
+                    X_train, X_test, y_train, y_test = problem.get_X_y(
+                        n_train, rng=self.rng)
 
-                X_train, X_test, y_train, y_test = train_test_split(
-                    X, y, test_size=self.test_prop)
+                    for est_idx, est in enumerate(self.estimators):
+                        _est = clone(est, safe=False)
+                        try:
+                            t0 = time.time()
+                            _est.fit(X_train, y_train)
+                            _est.fitting_time_ = time.time() - t0
+                        except Exception as e:
+                            warnings.warn(
+                                f"Run {iter_idx} failed for '{self.est_names[est_idx]}'"
+                                f" on '{problem.dataset}': {e}")
+                            continue
 
-                std = X_train.std()
-                non_zero = std[std != 0].index
-                X_train = X_train[non_zero]
-                X_test = X_test[non_zero]
-
-                for est_idx, est in enumerate(self.estimators):
-                    _est = clone(est, safe=False)
-                    try:
-                        t0 = time.time()
-                        _est.fit(X_train, y_train)
-                        _est.fitting_time_ = time.time() - t0
-                    except Exception as e:
-                        warnings.warn(
-                            f"Run {iter_idx} failed for '{self.est_names[est_idx]}'"
-                            f" on '{problem.dataset}': {e}")
-                        continue
-
-                    for stat in self.stats:
-                        self.__dict__[str(stat) + '_'][
-                            iter_idx, prob_idx, 0, est_idx] = stat(
-                                _est, problem, X_test, y_test)
+                        for stat in self.stats:
+                            self.__dict__[str(stat) + '_'][
+                                iter_idx, prob_idx, n_idx, est_idx] = stat(
+                                    _est, problem, X_test, y_test)
 
             if self.verbose:
                 print()
