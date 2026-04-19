@@ -19,8 +19,15 @@ See the **Project Setup** section in `README.md` for environment setup instructi
 - Day-to-day work goes on the `dev` branch; `main` is kept green
 - CI runs on push to both `dev` and `main` via `.github/workflows/ci.yml` — two jobs: `package-test` (package deps only, doctest) and `project-test` (full requirements, all tests)
 - Run all tests via `pytest` before commit
+- **Testing philosophy:** doctests are the primary test vehicle for all user-facing interfaces — they serve as executable documentation and are run in the `package-test` CI job. Add standard `pytest` tests for technical requirements that are of secondary or no concern to the user, or to keep docstrings concise by moving coverage that would otherwise bloat them.
 - All local Python processs use dedicated virtual environment
 - When finishing a development branch: push to `dev` first, wait for CI, then merge to `main`
+
+## Research Reproducibility
+
+Exact numerical reproduction of published paper results is a first-class concern. Currently this applies to the NeurIPS 2023 results (reproduced by `real_data_neurips2023.ipynb`); the same principle extends to any future publications. Designs that would reduce reproducibility should not be proposed in the first place — any deviation is a conscious, explicitly justified decision taken long before implementation, not something discovered at merge time.
+
+The experiment infrastructure (`experiments/`) is a candidate for extraction into a standalone package. This makes principled, general solutions doubly important: shortcuts or repo-specific hacks will become technical debt the moment the code is published independently.
 
 ## Architecture
 
@@ -46,6 +53,8 @@ Both classes follow the scikit-learn estimator API (`fit(X, y)` / `predict(X)`) 
 - **Notebooks** (`real_data.ipynb`, `tutorial.ipynb`, `sparse_designs.ipynb`, `double_asymptotic_trends.ipynb`): run via `nbmake` in CI. Cells tagged `skip-execution` are skipped — used for expensive full-experiment cells.
 
 **Superpowers docs** live in `docs/superpowers/` with three subdirectories: `specs/` (approved designs), `plans/` (implementation plans), `issues/` (open questions and investigations — some may eventually become specs, others may not). All files are date-stamped (`YYYY-MM-DD-<topic>.md`).
+
+**Design documents** must open with a concise statement of the core motivation — the problem being solved and why it matters. All design decisions should be explicitly derived from that motivation; decisions that cannot be traced back to it are a signal the scope has drifted.
 
 `Analysis/` contains legacy research notebooks. These are not part of CI and may depend on local files not in the repository.
 

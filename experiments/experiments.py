@@ -282,9 +282,12 @@ class EmpiricalDataExperiment:
     problems : list of EmpiricalDataProblem
     estimators : list of estimator objects
     reps : int
-    ns : array-like
-        Training set sizes. Broadcast to shape (n_problems, n_sizes).
-        Use n_train_from_proportion() to derive from the dataset registry.
+    ns : array-like of shape (n_problems, n_sizes)
+        Provides n_sizes training sizes per problem for which to assess
+        estimator performance. A 1-D input is treated as a single row and
+        broadcast to all problems; to assign a single varying size per problem
+        pass a list of single-element lists ``[[n1], [n2], ...]`` or use
+        n_train_from_proportion().
     seed : int or None
     generator : {'PCG64', 'MT19937'}, default 'PCG64'
         'MT19937' uses np.random.RandomState for legacy numerical equivalence.
