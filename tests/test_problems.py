@@ -21,3 +21,23 @@ def test_one_hot_encode_accepts_rng():
     enc = OneHotEncodeCategories()
     result = enc(X, np.random.default_rng(0))
     assert result.equals(X)
+
+
+from problems import EmpiricalDataProblem
+
+
+def test_zero_variance_filter_default_false():
+    assert EmpiricalDataProblem('diabetes', 'target').zero_variance_filter is False
+
+
+def test_zero_variance_filter_in_repr_only_when_true():
+    assert 'zero_variance_filter' not in repr(EmpiricalDataProblem('diabetes', 'target'))
+    assert repr(EmpiricalDataProblem('diabetes', 'target', zero_variance_filter=True)) == \
+        "EmpiricalDataProblem('diabetes', 'target', zero_variance_filter=True)"
+
+
+def test_zero_variance_filter_affects_equality():
+    p_false = EmpiricalDataProblem('diabetes', 'target')
+    p_true = EmpiricalDataProblem('diabetes', 'target', zero_variance_filter=True)
+    assert p_false == EmpiricalDataProblem('diabetes', 'target', zero_variance_filter=False)
+    assert p_false != p_true

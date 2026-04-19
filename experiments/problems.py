@@ -131,19 +131,21 @@ class EmpiricalDataProblem:
     """
 
     def __init__(self, dataset, target, drop=None, nan_policy=None,
-                 x_transforms=None, y_transforms=None):
+                 x_transforms=None, y_transforms=None, zero_variance_filter=False):
         self.dataset = dataset
         self.target = target
         self.drop = tuple(drop or [])
         self.nan_policy = nan_policy
         self.x_transforms = tuple(x_transforms or [])
         self.y_transforms = tuple(y_transforms or [])
+        self.zero_variance_filter = zero_variance_filter
         self._repr = (
             f'EmpiricalDataProblem({self.dataset!r}, {self.target!r}'
             + (f', drop={list(self.drop)!r}' if self.drop else '')
             + (f', nan_policy={self.nan_policy!r}' if self.nan_policy else '')
             + (f', x_transforms={list(self.x_transforms)!r}' if self.x_transforms else '')
             + (f', y_transforms={list(self.y_transforms)!r}' if self.y_transforms else '')
+            + (', zero_variance_filter=True' if self.zero_variance_filter else '')
             + ')'
         )
 
