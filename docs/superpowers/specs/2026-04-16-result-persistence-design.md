@@ -3,8 +3,11 @@
 ## Prerequisite
 
 This spec requires the [preprocessing pipeline design](2026-04-17-preprocessing-pipeline-design.md)
-to be implemented first. That spec establishes `EmpiricalDataProblem.__repr__` as
-the canonical, session-stable string identity used here to derive cache keys.
+and the [seeding refactor design](2026-04-18-empirical-experiment-seeding-refactor-design.md)
+to be implemented first. The preprocessing design establishes `EmpiricalDataProblem.__repr__`
+as the canonical, session-stable string identity used here to derive cache keys.
+The seeding refactor establishes `n_train`, `generator`, `seed_scope`, and
+`seed_progression` as first-class parameters on `EmpiricalDataExperiment`.
 No changes to `problems.py` are made by this spec.
 
 ---
@@ -23,8 +26,8 @@ iterating on a subset of estimators.
 **Trial** — the atomic unit of work: one (problem, estimator, n, seed) combination
 producing one scalar per metric.
 
-**Series** — all reps for one (problem, estimator, n, base\_seed, n\_iterations)
-combination, stored as a 1-D array of length `n_iterations` per metric.
+**Series** — all reps for one (problem, estimator, n, base\_seed, reps)
+combination, stored as a 1-D array of length `reps` per metric.
 
 ---
 
@@ -33,55 +36,54 @@ combination, stored as a 1-D array of length `n_iterations` per metric.
 Seeding behaviour is controlled by three orthogonal parameters on
 `EmpiricalDataExperiment`:
 
-### `seed_mode`
+### `generator`
 
-*How* randomness is managed:
+*Which* numpy BitGenerator is used:
 
-- `'legacy'` — uses `np.random.seed()` (global numpy state). Current behaviour.
-- `'modern'` — uses `np.random.default_rng()` (explicit Generator object). Not yet
-  implemented; reserved for future use.
+- `'PCG64'` — `np.random.Generator(np.random.PCG64(seed))`. Default.
+- `'MT19937'` — `np.random.RandomState(seed)`. Numerically equivalent to the
+  legacy `np.random.seed` + `np.random.choice` path for datasets without
+  polynomial subsampling.
 
 ### `seed_scope`
 
 *When* the seed is applied:
 
 - `'series'` — seed is reset once per problem, before that problem's rep loop.
-  Current `EmpiricalDataExperiment` behaviour.
+  Default.
 - `'trial'` — seed is reset once per rep, inside the rep loop, before the split.
-- `'experiment'` — seed is set once at construction time and a single RNG object
-  advances through everything. Current `Experiment` behaviour; not applicable to
-  `EmpiricalDataExperiment` in this spec.
+- `'experiment'` — seed is set once and a single RNG object advances through
+  everything.
 
 ### `seed_progression`
 
 *What value* is used at each scope boundary:
 
-- `'fixed'` — always use `base_seed`. Current behaviour (`np.random.seed(seed)` gives
-  the same split sequence for every problem).
-- `'sequential'` — use `base_seed + unit_idx`, where `unit_idx` is the rep index for
+- `'fixed'` — always use `seed`. Default (gives the same split sequence for
+  every problem under `seed_scope='series'`).
+- `'sequential'` — use `seed + unit_idx`, where `unit_idx` is the rep index for
   `seed_scope='trial'` or the problem index for `seed_scope='series'`.
-- `'random'` — derive seed from `hash(base_seed, unit_idx)`. Future; not implemented
-  in this spec.
 
 ### Defaults and legacy equivalence
 
-Default: `seed_mode='legacy', seed_scope='series', seed_progression='fixed'`.
-This is numerically identical to the current implementation — no existing notebook
-needs to change.
+Default: `generator='MT19937', seed_scope='series', seed_progression='fixed'`.
+This is numerically identical to the current implementation (for datasets without
+polynomial subsampling) — no existing notebook needs to change.
 
-### Caching support by mode
+### Caching support by scope
 
 The cache folder (`per_series/` or `per_trial/`) is determined by `seed_scope`.
-Within that, the seed value used as the filename is determined by `seed_progression`:
+Within that, the seed value used in the path is determined by `seed_progression`:
 
 | `seed_scope` | `seed_progression` | File seed value | Cache granularity |
 |---|---|---|---|
-| `'series'` | `'fixed'` | `base_seed` | all reps together per estimator |
-| `'series'` | `'sequential'` | `base_seed + prob_idx` | all reps together per estimator |
-| `'trial'` | `'sequential'` | `base_seed + rep_idx` | one rep at a time per estimator |
+| `'series'` | `'fixed'` | `seed` | all reps together per estimator |
+| `'series'` | `'sequential'` | `seed + prob_idx` | all reps together per estimator |
+| `'trial'` | `'sequential'` | `seed + rep_idx` | one rep at a time per estimator |
 
-`seed_mode` (`'legacy'` / `'modern'`) does not affect the path or cache lookup — it
-only determines which numpy API performs the seeding.
+`generator` affects both the path (via a `<generator>/` directory level) and the
+numerical results — two runs with the same seed but different generators produce
+different splits and must be stored separately.
 
 ---
 
@@ -125,31 +127,34 @@ results/
     <problem_key>/
       <n_train>/
         <estimator_key>/
-          <n_iterations>/
-            <base_seed>/
-              metrics.npz       ← one key per metric, arrays of shape (n_iterations,)
-              predictions/      ← (future) one .npy per rep
-              estimators/       ← (future) one .pkl per rep
-              meta.json         ← (future) per-series metadata
+          <reps>/
+            <generator>/
+              <base_seed>/
+                metrics.npz       <- one key per metric, arrays of shape (reps,)
+                predictions/      <- (future) one .npy per rep
+                estimators/       <- (future) one .pkl per rep
+                meta.json         <- (future) per-series metadata
   per_trial/
     <problem_key>/
       <n_train>/
         <estimator_key>/
-          <trial_seed>/
-            metrics.npz         ← one key per metric, scalar values
-            predictions.npy     ← (future) y_pred array for this trial
-            estimator.pkl       ← (future) fitted estimator for this trial
-            meta.json           ← (future) per-trial metadata
-  runs/                         ← (future) one file per experiment run
+          <generator>/
+            <trial_seed>/
+              metrics.npz         <- one key per metric, scalar values
+              predictions.npy     <- (future) y_pred array for this trial
+              estimator.pkl       <- (future) fitted estimator for this trial
+              meta.json           <- (future) per-trial metadata
+  runs/                           <- (future) one file per experiment run
 ```
 
-The top-level subfolder is determined by `seed_scope` alone: `'series'` →
-`per_series/`, `'trial'` → `per_trial/`. `<n_train>/` captures the actual training
-set size — two experiments on the same problem with different `test_prop` values
-produce different n_train values and therefore separate paths, with no need to
-encode `test_prop` in any hash. `<n_iterations>/` means series of different lengths
-coexist without conflict. Using a directory per trial/series rather than a flat file
-allows future artifact types to be added without changing the key structure.
+The top-level subfolder is determined by `seed_scope` alone: `'series'` ->
+`per_series/`, `'trial'` -> `per_trial/`. `<n_train>/` captures the actual training
+set size — two experiments on the same problem with different `n_train` values
+produce separate paths. `<reps>/` means series of different lengths coexist without
+conflict. `<generator>/` separates results from different BitGenerators since the
+same seed produces different numerical outcomes across generators. Using a directory
+per trial/series rather than a flat file allows future artifact types to be added
+without changing the key structure.
 
 ### Storage format: `.npz`
 
@@ -164,7 +169,7 @@ flexible but Python-only and not safe for untrusted input. For metric arrays,
 `.npz` is the right default.
 
 `metrics.npz` stores one key per metric (e.g. `prediction_r2`, `fitting_time`):
-- `per_series/` files: array of shape `(n_iterations,)` — one value per rep
+- `per_series/` files: array of shape `(reps,)` — one value per rep
 - `per_trial/` files: scalar — the single rep result
 
 Storing metrics as separate keys means adding or removing a metric from `stats` only
@@ -181,13 +186,9 @@ in the directory path, not inside the file.
 {ClassName}__{short_hash}
 ```
 
-`polynomial` is superseded by the [preprocessing pipeline design](2026-04-17-preprocessing-pipeline-design.md):
-polynomial expansion moves fully into `EmpiricalDataProblem` as a
-`PolynomialExpansion` entry in `x_transforms`, not as a separate constructor
-parameter. The `polynomial` parameter is not added to `EmpiricalDataProblem`.
-
-`EmpiricalDataProblem` gains a stable `__repr__` that fully encodes its identity.
-The `problem_key` is derived from it by the persistence layer:
+`EmpiricalDataProblem` has a stable `__repr__` that fully encodes its identity,
+including any `x_transforms` (e.g. `PolynomialExpansion`). The `problem_key` is
+derived from it by the persistence layer:
 
 ```python
 import hashlib
@@ -195,14 +196,9 @@ problem_key = f'{type(problem).__name__}__{hashlib.md5(repr(problem).encode()).h
 ```
 
 No `cache_key()` method is added to `EmpiricalDataProblem` — the persistence
-layer computes the key directly from `repr()`. `__hash__` is updated to
-`hash(repr(self))` for consistent in-memory identity (sets, dict keys); the
-persistence layer uses `repr()` directly for cross-session stable filesystem
-paths rather than relying on `__hash__`.
-
-`test_prop` is not part of the problem key — it is captured by `<n_train>/` in the
-path, since different `test_prop` values on the same problem yield different n_train
-values and thus different directories.
+layer computes the key directly from `repr()`. `__hash__` is `hash(repr(self))`
+for consistent in-memory identity (sets, dict keys); the persistence layer uses
+`repr()` directly for cross-session stable filesystem paths.
 
 Example: `EmpiricalDataProblem__a3f2b1c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0`
 
@@ -231,33 +227,24 @@ Example: `RidgeEM__7d3a1f2e`
 
 ```python
 EmpiricalDataExperiment(
-    problems, estimators, n_iterations,
-    test_prop=0.3, seed=None,
-    seed_mode='legacy',         # new
-    seed_scope='series',        # new
-    seed_progression='fixed',   # new
+    problems, estimators, reps, ns,
+    seed=None,
+    generator='PCG64',        # new: 'PCG64' | 'MT19937'
+    seed_scope='series',      # new: 'series' | 'trial' | 'experiment'
+    seed_progression='fixed', # new: 'fixed' | 'sequential'
     stats=None, est_names=None, verbose=True
 )
 ```
 
-### `run(overwrite=False)` loop change for `seed_scope='trial'`
-
-```python
-for iter_idx in range(self.n_iterations):
-    if self.seed_scope == 'trial':
-        seed_val = (self.seed or 0) + iter_idx  # 'sequential'
-        np.random.seed(seed_val)                 # 'legacy' mode
-    X_train, X_test, y_train, y_test = train_test_split(...)
-```
-
-`seed_scope='series'` keeps the existing reset before the problem's rep loop.
+See the [seeding refactor design](2026-04-18-empirical-experiment-seeding-refactor-design.md)
+for the full loop structure and `_make_rng` implementation.
 
 ---
 
 ## Scope
 
 This spec covers `EmpiricalDataExperiment` only. `Experiment` (synthetic problems)
-uses `seed_scope='experiment'` and is not modified here. The file structure and
+uses a single experiment-scoped RNG and is not modified here. The file structure and
 parameter names are designed to accommodate `Experiment` caching in a future spec
 without breaking changes.
 
@@ -282,7 +269,7 @@ without breaking changes.
 
 ## Files
 
-- Modify: `experiments/experiments.py` — add `seed_mode`, `seed_scope`,
+- Modify: `experiments/experiments.py` — add `generator`, `seed_scope`,
   `seed_progression` to `EmpiricalDataExperiment.__init__`; update `run()`;
   add `CACHE_DIR` module constant
 - Create: `results/.gitignore` — containing `*` and `!.gitignore`
@@ -291,50 +278,21 @@ without breaking changes.
 
 ## Future
 
-### Polynomial feature subsampling
-
-When `polynomial` is set and the expanded feature matrix exceeds 35 million entries,
-`EmpiricalDataExperiment.run()` currently applies random column subsampling
-(`np.random.choice`) to reduce dimensionality. This sampling happens **before** the
-per-problem seed reset, meaning it consumes from whatever numpy state was current at
-that point — it is not deterministic in a clearly reasoned way, and it is not
-captured in the trial or series cache key.
-
-Two paths forward:
-
-1. **Move into the problem**: make polynomial expansion (including subsampling) a
-   responsibility of `EmpiricalDataProblem` rather than the experiment. The problem
-   would apply a fixed subsampling derived deterministically from its own hash. The
-   result is that the feature space is fully determined by the problem identity and
-   is already captured in the `problem_key`. No experiment-level randomness for
-   feature construction.
-
-2. **Move into the estimator**: treat the polynomial transformer as part of a
-   pipeline estimator. The subsampling seed would then be part of `get_params()` and
-   would be captured in the `estimator_key`. This keeps the feature construction
-   visible as a modelling choice rather than a data preprocessing step.
-
-Either path removes an uncontrolled source of randomness from the experiment loop.
-Path 1 is more natural given the current architecture; path 2 aligns better with the
-long-term goal of estimators carrying all modelling decisions.
-
 ### Random estimators
 
 Some estimators (e.g. those using stochastic optimisation or random initialisation)
-carry their own internal randomness. Under the current `seed_mode='legacy'` design,
-an estimator's effective seed depends on how much global numpy state was consumed by
-the split before `fit()` is called — this is deterministic but fragile and hard to
-reason about.
+carry their own internal randomness. Under `generator='MT19937'` with
+`seed_scope='series'`, an estimator's effective seed depends on how much generator
+state was consumed by the split before `fit()` is called — this is deterministic
+but fragile and hard to reason about.
 
-The clean solution is `seed_mode='modern'` with `seed_scope='trial'`: each trial
-gets a parent `default_rng` Generator, from which child generators are spawned
-deterministically — one for the split, one passed to the estimator via
-`set_params(random_state=child_rng)`. This makes the trial fully self-contained: the
-trial seed alone determines both the data split and every estimator's internal
-randomness. The `estimator_key` remains unchanged (it captures class and
-deterministic constructor params), and the `trial_seed` in the file path captures
-the rest.
+The clean solution is `generator='PCG64'` with `seed_scope='trial'`: each trial
+gets a parent Generator, from which child generators are spawned deterministically
+— one for the split, one passed to the estimator via `set_params(random_state=child_rng)`.
+This makes the trial fully self-contained: the trial seed alone determines both the
+data split and every estimator's internal randomness. The `estimator_key` remains
+unchanged (it captures class and deterministic constructor params), and the
+`<trial_seed>` in the file path captures the rest.
 
-This design requires that estimators accept a `random_state` parameter (the sklearn
-convention). Estimators without internal randomness ignore it. This is the primary
-motivation for eventually deprecating `seed_mode='legacy'` in favour of `'modern'`.
+This requires estimators to accept a `random_state` parameter (the sklearn convention).
+Estimators without internal randomness ignore it.
