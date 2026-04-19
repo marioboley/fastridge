@@ -6,6 +6,7 @@ import warnings
 import numpy as np
 import pandas as pd
 from scipy.stats import wishart, multivariate_normal, uniform
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import OneHotEncoder, PolynomialFeatures
 
 from data import get_dataset, DATASETS
@@ -44,65 +45,62 @@ class EmpiricalDataProblem:
 
     Examples
     --------
-    Basic usage:
+    Basic usage — returns (X_train, X_test, y_train, y_test):
 
+    >>> import numpy as np
     >>> diabetes = EmpiricalDataProblem('diabetes', 'target')
-    >>> X, y = diabetes.get_X_y()
-    >>> X.shape
-    (442, 10)
-    >>> yacht = EmpiricalDataProblem('yacht', 'Residuary_resistance')
-    >>> X, y = yacht.get_X_y()
-    >>> X.shape
-    (308, 6)
-    >>> automobile = EmpiricalDataProblem('automobile', 'price')
-    >>> X, y = automobile.get_X_y()
-    >>> X.shape[0]
-    201
-    >>> list(X.index) == list(y.index) == list(range(201))
-    True
+    >>> X_train, X_test, y_train, y_test = diabetes.get_X_y(300)
+    >>> X_train.shape
+    (300, 10)
 
     Dropping columns:
 
     >>> yacht_no_froude = EmpiricalDataProblem('yacht', 'Residuary_resistance',
     ...                                        drop=['Froude_number'])
-    >>> X, y = yacht_no_froude.get_X_y()
-    >>> X.shape
-    (308, 5)
+    >>> X_train, _, _, _ = yacht_no_froude.get_X_y(200)
+    >>> X_train.shape[1]
+    5
 
-    NaN handling — drop rows or columns (index is always reset and aligned):
+    NaN handling:
 
     >>> auto = EmpiricalDataProblem('automobile', 'price', nan_policy='drop_rows')
-    >>> X, y = auto.get_X_y()
-    >>> X.shape[0]
-    159
-    >>> list(X.index) == list(y.index) == list(range(159))
-    True
-    >>> auto_cols = EmpiricalDataProblem('automobile', 'price', nan_policy='drop_cols')
-    >>> X, y = auto_cols.get_X_y()
-    >>> X.shape
-    (201, 19)
-    >>> list(X.index) == list(y.index) == list(range(201))
-    True
+    >>> X_train, _, _, _ = auto.get_X_y(100)
+    >>> X_train.shape[0]
+    100
 
-    y_transforms — apply callables to the target after the X/y split:
+    y_transforms:
 
-    >>> import numpy as np
     >>> diabetes_log = EmpiricalDataProblem('diabetes', 'target',
     ...                                     y_transforms=[np.log])
-    >>> X, y_log = diabetes_log.get_X_y()
-    >>> X_base, y_base = diabetes.get_X_y()
+    >>> _, _, y_log, _ = diabetes_log.get_X_y(300, rng=0)
+    >>> _, _, y_base, _ = diabetes.get_X_y(300, rng=0)
     >>> np.allclose(y_log.values, np.log(y_base.values))
     True
 
-    x_transforms — apply callables to X after the X/y split:
+    x_transforms:
 
     >>> ohe = EmpiricalDataProblem('automobile', 'price',
     ...                            nan_policy='drop_rows',
     ...                            x_transforms=[OneHotEncodeCategories()])
-    >>> X_ohe, y_ohe = ohe.get_X_y()
-    >>> X_ohe.shape[0]
-    159
-    >>> 'fuel-type_gas' in X_ohe.columns
+    >>> X_train_ohe, _, _, _ = ohe.get_X_y(100)
+    >>> 'fuel-type_gas' in X_train_ohe.columns
+    True
+
+    zero_variance_filter drops constant train columns from both splits:
+
+    >>> naval = EmpiricalDataProblem('naval_propulsion', 'GT_compressor_decay',
+    ...     drop=['GT_turbine_decay'])
+    >>> naval_filt = EmpiricalDataProblem('naval_propulsion', 'GT_compressor_decay',
+    ...     drop=['GT_turbine_decay'], zero_variance_filter=True)
+    >>> Xtr, _, _, _ = naval.get_X_y(50, rng=0)
+    >>> std = Xtr.std()
+    >>> zero_var = std[std == 0].index.tolist()
+    >>> zero_var
+    ['T1', 'P1']
+    >>> Xtr_f, Xte_f, _, _ = naval_filt.get_X_y(50, rng=0)
+    >>> list(Xtr_f.columns) == [c for c in Xtr.columns if c not in zero_var]
+    True
+    >>> list(Xte_f.columns) == list(Xtr_f.columns)
     True
 
     Value-object identity (repr-based hash and equality):
@@ -160,7 +158,9 @@ class EmpiricalDataProblem:
     def __hash__(self):
         return hash(self._repr)
 
-    def get_X_y(self):
+    def get_X_y(self, n_train, rng=None):
+        if not isinstance(rng, np.random.RandomState):
+            rng = np.random.default_rng(rng)
         df = get_dataset(self.dataset)
         missing = [c for c in self.drop if c not in df.columns]
         if missing:
@@ -177,8 +177,22 @@ class EmpiricalDataProblem:
         for fn in self.y_transforms:
             y = fn(y)
         for fn in self.x_transforms:
-            X = fn(X)
-        return X, y
+            X = fn(X, rng)
+        if isinstance(rng, np.random.RandomState):
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, train_size=n_train, random_state=rng)
+        else:
+            indices = rng.permutation(len(X))
+            X_train = X.iloc[indices[:n_train]]
+            X_test = X.iloc[indices[n_train:]]
+            y_train = y.iloc[indices[:n_train]]
+            y_test = y.iloc[indices[n_train:]]
+        if self.zero_variance_filter:
+            std = X_train.std()
+            non_zero = std[std != 0].index
+            X_train = X_train[non_zero]
+            X_test = X_test[non_zero]
+        return X_train, X_test, y_train, y_test
 
 
 class PolynomialExpansion:
