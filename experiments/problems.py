@@ -146,6 +146,17 @@ class EmpiricalDataProblem:
             + ')'
         )
 
+    def replace(self, **kwargs):
+        return EmpiricalDataProblem(
+            dataset=kwargs.get('dataset', self.dataset),
+            target=kwargs.get('target', self.target),
+            drop=kwargs.get('drop', list(self.drop)),
+            nan_policy=kwargs.get('nan_policy', self.nan_policy),
+            x_transforms=kwargs.get('x_transforms', list(self.x_transforms)),
+            y_transforms=kwargs.get('y_transforms', list(self.y_transforms)),
+            zero_variance_filter=kwargs.get('zero_variance_filter', self.zero_variance_filter),
+        )
+
     def __repr__(self):
         return self._repr
 
@@ -424,67 +435,81 @@ _OHE = [OneHotEncodeCategories()]
 
 NEURIPS2023 = frozenset({
     EmpiricalDataProblem('abalone',          'Rings',
-                         x_transforms=_OHE),
-    EmpiricalDataProblem('airfoil',          'scaled-sound-pressure'),
+                         x_transforms=_OHE, zero_variance_filter=True),
+    EmpiricalDataProblem('airfoil',          'scaled-sound-pressure',
+                         zero_variance_filter=True),
     EmpiricalDataProblem('automobile',       'price',
                          nan_policy='drop_rows',
                          x_transforms=_OHE,
-                         y_transforms=[np.log]),
+                         y_transforms=[np.log],
+                         zero_variance_filter=True),
     EmpiricalDataProblem('autompg',          'mpg',
-                         drop=['car_name'], nan_policy='drop_rows'),
-    EmpiricalDataProblem('blog',             'V281'),
-    EmpiricalDataProblem('boston',           'medv'),
-    EmpiricalDataProblem('concrete',         'Concrete compressive strength'),
+                         drop=['car_name'], nan_policy='drop_rows',
+                         zero_variance_filter=True),
+    EmpiricalDataProblem('blog',             'V281',
+                         zero_variance_filter=True),
+    EmpiricalDataProblem('boston',           'medv',
+                         zero_variance_filter=True),
+    EmpiricalDataProblem('concrete',         'Concrete compressive strength',
+                         zero_variance_filter=True),
     EmpiricalDataProblem('crime',            'ViolentCrimesPerPop',
                          drop=['state', 'fold', 'communityname'],
-                         nan_policy='drop_cols'),
-    EmpiricalDataProblem('ct_slices',        'reference'),
-    EmpiricalDataProblem('diabetes',         'target'),
-    EmpiricalDataProblem('eye',              'y'),
+                         nan_policy='drop_cols',
+                         zero_variance_filter=True),
+    EmpiricalDataProblem('ct_slices',        'reference',
+                         zero_variance_filter=True),
+    EmpiricalDataProblem('diabetes',         'target',
+                         zero_variance_filter=True),
+    EmpiricalDataProblem('eye',              'y',
+                         zero_variance_filter=True),
     EmpiricalDataProblem('facebook',         'Total Interactions',
                          drop=['comment', 'like', 'share'],
                          nan_policy='drop_rows',
-                         x_transforms=_OHE),
+                         x_transforms=_OHE,
+                         zero_variance_filter=True),
     EmpiricalDataProblem('forest',           'area',
                          x_transforms=_OHE,
-                         y_transforms=[np.log1p]),
+                         y_transforms=[np.log1p],
+                         zero_variance_filter=True),
     EmpiricalDataProblem('naval_propulsion', 'GT_compressor_decay',
-                         drop=['GT_turbine_decay']),
+                         drop=['GT_turbine_decay'],
+                         zero_variance_filter=True),
     EmpiricalDataProblem('naval_propulsion', 'GT_turbine_decay',
-                         drop=['GT_compressor_decay']),
+                         drop=['GT_compressor_decay'],
+                         zero_variance_filter=True),
     EmpiricalDataProblem('parkinsons',       'motor_UPDRS',
-                         drop=['total_UPDRS']),
+                         drop=['total_UPDRS'],
+                         zero_variance_filter=True),
     EmpiricalDataProblem('parkinsons',       'total_UPDRS',
-                         drop=['motor_UPDRS']),
-    EmpiricalDataProblem('real_estate',      'Y house price of unit area'),
-    EmpiricalDataProblem('ribo',             'y'),
+                         drop=['motor_UPDRS'],
+                         zero_variance_filter=True),
+    EmpiricalDataProblem('real_estate',      'Y house price of unit area',
+                         zero_variance_filter=True),
+    EmpiricalDataProblem('ribo',             'y',
+                         zero_variance_filter=True),
     EmpiricalDataProblem('student',          'G3',
                          drop=['G1', 'G2'],
-                         x_transforms=_OHE),
-    EmpiricalDataProblem('tomshw',           'V97'),
-    EmpiricalDataProblem('twitter',          'V78'),
+                         x_transforms=_OHE,
+                         zero_variance_filter=True),
+    EmpiricalDataProblem('tomshw',           'V97',
+                         zero_variance_filter=True),
+    EmpiricalDataProblem('twitter',          'V78',
+                         zero_variance_filter=True),
     EmpiricalDataProblem('yacht',            'Residuary_resistance',
-                         y_transforms=[np.log]),
+                         y_transforms=[np.log],
+                         zero_variance_filter=True),
 })
 
 
-def _with_polynomial(p, degree):
-    return EmpiricalDataProblem(
-        p.dataset, p.target, list(p.drop), p.nan_policy,
-        x_transforms=list(p.x_transforms) + [PolynomialExpansion(degree)],
-        y_transforms=list(p.y_transforms),
-    )
-
-
 NEURIPS2023_D2 = frozenset(
-    _with_polynomial(p, 2)
+    p.replace(x_transforms=list(p.x_transforms) + [PolynomialExpansion(2)])
     for p in NEURIPS2023
     if 'p' in DATASETS[p.dataset]
     and DATASETS[p.dataset]['p'] < 1000
 )
 
 NEURIPS2023_D3 = frozenset(
-    _with_polynomial(p, 3)
+    p.replace(x_transforms=list(p.x_transforms) + [PolynomialExpansion(3)])
     for p in NEURIPS2023
     if 'p' in DATASETS[p.dataset]
     and 'n' in DATASETS[p.dataset]

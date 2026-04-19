@@ -23,7 +23,7 @@ def test_one_hot_encode_accepts_rng():
     assert result.equals(X)
 
 
-from problems import EmpiricalDataProblem, PolynomialExpansion
+from problems import EmpiricalDataProblem, PolynomialExpansion, NEURIPS2023, NEURIPS2023_D2, NEURIPS2023_D3
 
 
 def test_zero_variance_filter_default_false():
@@ -91,3 +91,9 @@ def test_get_X_y_rng_threading_to_transforms():
     Xtr1, _, _, _ = prob.get_X_y(50, rng=1)
     Xtr2, _, _, _ = prob.get_X_y(50, rng=1)
     assert list(Xtr1.columns) == list(Xtr2.columns)
+
+
+def test_neurips2023_zero_variance_filter():
+    assert all(p.zero_variance_filter for p in NEURIPS2023)
+    assert all(p.zero_variance_filter for p in NEURIPS2023_D2)
+    assert all(p.zero_variance_filter for p in NEURIPS2023_D3)
