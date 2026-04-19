@@ -178,6 +178,10 @@ class EmpiricalDataProblem:
         for fn in self.x_transforms:
             X = fn(X, rng)
         n_test = len(X) - n_train
+        if n_test < 1:
+            raise ValueError(
+                f"n_train={n_train} leaves no test rows (dataset has {len(X)} rows "
+                f"after preprocessing).")
         indices = rng.permutation(len(X))
         X_train = X.iloc[indices[n_test:]]
         X_test  = X.iloc[indices[:n_test]]
@@ -189,6 +193,24 @@ class EmpiricalDataProblem:
             X_train = X_train[non_zero]
             X_test = X_test[non_zero]
         return X_train, X_test, y_train, y_test
+
+
+def n_train_from_proportion(problems, prop=0.7):
+    """Return per-problem n_train ints derived from a proportion of dataset size.
+
+    Uses the 'n' entry in DATASETS for each problem. Raises KeyError if 'n' is
+    absent. The registry count may differ from the actual loaded row count when
+    nan_policy drops rows.
+
+    Examples
+    --------
+    >>> probs = [EmpiricalDataProblem('diabetes', 'target')]
+    >>> int(n_train_from_proportion(probs)[0])
+    309
+    >>> int(n_train_from_proportion(probs, prop=0.8)[0])
+    353
+    """
+    return np.array([int(DATASETS[p.dataset]['n'] * prop) for p in problems])
 
 
 class PolynomialExpansion:
@@ -469,3 +491,38 @@ NEURIPS2023_D3 = frozenset(
     and DATASETS[p.dataset]['p'] < 150
     and DATASETS[p.dataset]['n'] < 20000
 )
+
+# Training set sizes (n_train = floor(0.7 * n_actual)) derived from actual
+# post-preprocessing row counts. Keyed by (dataset, target) and shared across
+# NEURIPS2023, NEURIPS2023_D2, and NEURIPS2023_D3 (polynomial expansion does
+# not change row count).
+#
+# Deviations from floor(0.7 * DATASETS[dataset]['n']):
+#   automobile: actual n=159 after drop_rows (registry n=205) -> n_train=111 vs 143
+#   autompg:    actual n=392 after drop_rows (registry n=398) -> n_train=274 vs 278
+#   facebook:   actual n=499 after drop_rows (registry n=500) -> n_train=349 vs 350
+NEURIPS2023_TRAIN_SIZES = {
+    ('abalone',          'Rings'):                         2923,
+    ('airfoil',          'scaled-sound-pressure'):         1052,
+    ('automobile',       'price'):                          111,
+    ('autompg',          'mpg'):                            274,
+    ('blog',             'V281'):                         36677,
+    ('boston',           'medv'):                           354,
+    ('concrete',         'Concrete compressive strength'):  721,
+    ('crime',            'ViolentCrimesPerPop'):           1395,
+    ('ct_slices',        'reference'):                    37450,
+    ('diabetes',         'target'):                         309,
+    ('eye',              'y'):                               84,
+    ('facebook',         'Total Interactions'):             349,
+    ('forest',           'area'):                           361,
+    ('naval_propulsion', 'GT_compressor_decay'):           8353,
+    ('naval_propulsion', 'GT_turbine_decay'):              8353,
+    ('parkinsons',       'motor_UPDRS'):                   4112,
+    ('parkinsons',       'total_UPDRS'):                   4112,
+    ('real_estate',      'Y house price of unit area'):     289,
+    ('ribo',             'y'):                               49,
+    ('student',          'G3'):                             454,
+    ('tomshw',           'V97'):                          19725,
+    ('twitter',          'V78'):                         408275,
+    ('yacht',            'Residuary_resistance'):           215,
+}
