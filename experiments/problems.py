@@ -6,7 +6,6 @@ import warnings
 import numpy as np
 import pandas as pd
 from scipy.stats import wishart, multivariate_normal, uniform
-from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import OneHotEncoder, PolynomialFeatures
 
 from data import get_dataset, DATASETS
@@ -178,15 +177,12 @@ class EmpiricalDataProblem:
             y = fn(y)
         for fn in self.x_transforms:
             X = fn(X, rng)
-        if isinstance(rng, np.random.RandomState):
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y, train_size=n_train, random_state=rng)
-        else:
-            indices = rng.permutation(len(X))
-            X_train = X.iloc[indices[:n_train]]
-            X_test = X.iloc[indices[n_train:]]
-            y_train = y.iloc[indices[:n_train]]
-            y_test = y.iloc[indices[n_train:]]
+        n_test = len(X) - n_train
+        indices = rng.permutation(len(X))
+        X_train = X.iloc[indices[n_test:]]
+        X_test  = X.iloc[indices[:n_test]]
+        y_train = y.iloc[indices[n_test:]]
+        y_test  = y.iloc[indices[:n_test]]
         if self.zero_variance_filter:
             std = X_train.std()
             non_zero = std[std != 0].index
