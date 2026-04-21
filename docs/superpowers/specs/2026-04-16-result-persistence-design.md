@@ -2,12 +2,13 @@
 
 ## Prerequisite
 
-This spec requires the [preprocessing pipeline design](2026-04-17-preprocessing-pipeline-design.md)
-and the [seeding refactor design](2026-04-18-empirical-experiment-seeding-refactor-design.md)
-to be implemented first. The preprocessing design establishes `EmpiricalDataProblem.__repr__`
-as the canonical, session-stable string identity used here to derive cache keys.
-The seeding refactor establishes `n_train`, `generator`, `seed_scope`, and
-`seed_progression` as first-class parameters on `EmpiricalDataExperiment`.
+This spec requires the [preprocessing pipeline design](2026-04-17-preprocessing-pipeline-design.md),
+the [seeding refactor design](2026-04-18-empirical-experiment-seeding-refactor-design.md),
+and the [parameter-based identity design](2026-04-21-parameter-based-identity-design.md)
+to be implemented first. The seeding refactor establishes `n_train`, `generator`,
+`seed_scope`, and `seed_progression` as first-class parameters on
+`EmpiricalDataExperiment`. The parameter-based identity design establishes
+`joblib.hash()` as the cache key mechanism used here.
 No changes to `problems.py` are made by this spec.
 
 ---
@@ -70,15 +71,39 @@ Default: `generator='MT19937', seed_scope='series', seed_progression='fixed'`.
 This is numerically identical to the current implementation (for datasets without
 polynomial subsampling) — no existing notebook needs to change.
 
+### Legacy vs. forward-looking scopes
+
+`seed_scope='trial'` is the forward-looking mode. It offers the finest cache
+granularity: individual reps can be added or recomputed independently, and
+estimators can be added without disturbing existing results. It also extends
+naturally to randomised estimators — since each estimator has its own
+`<estimator_key>/<trial_seed>` path, passing `trial_seed` directly as an integer
+`random_state` gives each estimator independent, reproducible randomness with no
+coupling to the data split. This works with sklearn estimators using either
+generator.
+
+`seed_scope='series'` is a legacy mode required to cache the NeurIPS 2023 empirical
+results, which were computed with per-problem seeding. Adding estimators is still
+possible (new estimator key = new directory), but extending reps requires
+recomputing the whole series since all reps are stored together. Individual trial
+RNG states are not independently derivable from the base seed.
+
+`seed_scope='experiment'` is a legacy mode required to cache the NeurIPS 2023
+synthetic results (`Experiment` runner), which use a single advancing RNG across
+the whole run. Only whole-experiment caching is possible. This is still valuable
+beyond legacy reproduction: caching the full result array means plotting, table
+generation, and other analysis code can be iterated freely without rerunning
+expensive computations.
+
 ### Caching support by scope
 
-The cache folder (`per_series/` or `per_trial/`) is determined by `seed_scope`.
-Within that, the seed value used in the path is determined by `seed_progression`:
+The cache folder is determined by `seed_scope`. Within that, the seed value used in
+the path is determined by `seed_progression`:
 
 | `seed_scope` | `seed_progression` | File seed value | Cache granularity |
 |---|---|---|---|
-| `'series'` | `'fixed'` | `seed` | all reps together per estimator |
-| `'series'` | `'sequential'` | `seed + prob_idx` | all reps together per estimator |
+| `'series'` | `'fixed'` | `seed` | all reps together per estimator (legacy) |
+| `'series'` | `'sequential'` | `seed + prob_idx` | all reps together per estimator (legacy) |
 | `'trial'` | `'sequential'` | `seed + rep_idx` | one rep at a time per estimator |
 
 `generator` affects both the path (via a `<generator>/` directory level) and the
@@ -180,44 +205,30 @@ in the directory path, not inside the file.
 
 ## Cache Key Format
 
-### `problem_key`
+Both `problem_key` and `estimator_key` share the same format:
 
 ```
-{ClassName}__{short_hash}
+{ClassName}__{joblib_hash}
 ```
 
-`EmpiricalDataProblem` has a stable `__repr__` that fully encodes its identity,
-including any `x_transforms` (e.g. `PolynomialExpansion`). The `problem_key` is
-derived from it by the persistence layer:
+The hash is derived by the persistence layer using `joblib.hash()`, which hashes
+the full instance state via pickle. This captures all stored attributes including
+default parameter values, so that a change in any default automatically invalidates
+existing results. See the
+[parameter-based identity design](2026-04-21-parameter-based-identity-design.md)
+for the rationale.
 
 ```python
-import hashlib
-problem_key = f'{type(problem).__name__}__{hashlib.md5(repr(problem).encode()).hexdigest()}'
+import joblib
+problem_key   = f'{type(problem).__name__}__{joblib.hash(problem)}'
+estimator_key = f'{type(est).__name__}__{joblib.hash(est)}'
 ```
 
-No `cache_key()` method is added to `EmpiricalDataProblem` — the persistence
-layer computes the key directly from `repr()`. `__hash__` is `hash(repr(self))`
-for consistent in-memory identity (sets, dict keys); the persistence layer uses
-`repr()` directly for cross-session stable filesystem paths.
+For estimators, only the unfitted state is hashed — fitted attributes (`coef_`,
+etc.) are not present before `fit()` is called, so the key reflects constructor
+parameters only.
 
-Example: `EmpiricalDataProblem__a3f2b1c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0`
-
-### `estimator_key`
-
-Mirrors the `problem_key` format:
-
-```
-{ClassName}__{short_hash}
-```
-
-`short_hash` is the first 8 hex chars of `md5(str(sorted(est.get_params().items())))`.
-Estimators are treated as value objects whose semantic identity is their class and
-constructor parameters — the mutable fitted state (`coef_`, etc.) is not part of
-the key. `get_params()` is the standard sklearn method returning the constructor
-parameters. The class name is not included in the hash — it appears as the directory
-prefix and already disambiguates classes.
-
-Example: `RidgeEM__7d3a1f2e`
+Example: `EmpiricalDataProblem__8db1480a05fa91f6a3a86c57bb4f6af7`
 
 ---
 
@@ -257,9 +268,10 @@ without breaking changes.
   rather than hardcoding the path.
 - `metrics.npz` files are written atomically (write to a temp path, then
   `os.replace`) to avoid corrupted entries if a run is interrupted mid-write.
-- No automatic cache invalidation. The caller deletes stale entries when needed
-  (e.g. after changing a problem definition). Orphaned directories with unrecognised
-  keys are visible and harmless.
+- Cache keys change automatically when constructor parameters or their defaults
+  change (via `joblib.hash()`). Changing an estimator implementation without
+  changing its parameters requires manual deletion or `overwrite=True`. Orphaned
+  directories with unrecognised keys are visible and harmless.
 - `results/` is tracked in git via a `results/.gitignore` file containing `*` and
   `!.gitignore` — the standard pattern that ignores all content while keeping the
   directory itself. Committing specific result files is possible with `git add -f`
@@ -280,19 +292,15 @@ without breaking changes.
 
 ### Random estimators
 
-Some estimators (e.g. those using stochastic optimisation or random initialisation)
-carry their own internal randomness. Under `generator='MT19937'` with
-`seed_scope='series'`, an estimator's effective seed depends on how much generator
-state was consumed by the split before `fit()` is called — this is deterministic
-but fragile and hard to reason about.
+The per-trial file structure accommodates randomised estimators without structural
+changes. Possible approaches include threading the trial RNG through to `fit()`, or
+deriving a separate integer seed per estimator from the trial seed. A loop order of
+problems -> trials -> estimators (which matches the current runner) is particularly
+natural: the outer trial seed fixes the data split while estimator seeds can be
+varied independently in the innermost loop without affecting the split or other
+estimators.
 
-The clean solution is `generator='PCG64'` with `seed_scope='trial'`: each trial
-gets a parent Generator, from which child generators are spawned deterministically
-— one for the split, one passed to the estimator via `set_params(random_state=child_rng)`.
-This makes the trial fully self-contained: the trial seed alone determines both the
-data split and every estimator's internal randomness. The `estimator_key` remains
-unchanged (it captures class and deterministic constructor params), and the
-`<trial_seed>` in the file path captures the rest.
-
-This requires estimators to accept a `random_state` parameter (the sklearn convention).
-Estimators without internal randomness ignore it.
+If independent control over estimator randomness is needed — for example to average
+over estimator randomness at a fixed data split — a nested `<est_seed>/` level
+inside `<trial_seed>/` is the natural extension. This leaves all outer path levels
+unchanged and is fully backwards compatible with existing results.
