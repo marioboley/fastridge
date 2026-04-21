@@ -21,8 +21,25 @@ import numpy as np
 import time
 from scipy.linalg import svd
 from scipy.optimize import minimize
+from sklearn.base import BaseEstimator, RegressorMixin
 
-class RidgeEM:
+class RidgeEM(BaseEstimator, RegressorMixin):
+    """Bayesian ridge regression via Expectation-Maximization.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> rng = np.random.default_rng(0)
+    >>> X = rng.standard_normal((2000, 1))
+    >>> y = 2.0 * X[:, 0] + 0.5 * rng.standard_normal(2000)
+    >>> est = RidgeEM().fit(X, y)
+    >>> round(float(est.coef_[0]), 1)
+    2.0
+    >>> round(float(est.sigma_square_), 2)
+    0.25
+    >>> round(est.score(X, y), 2)
+    0.94
+    """
 
     def __init__(self, epsilon=0.00000001, fit_intercept=True, normalize=True, closed_form_m_step=True, trace=False, verbose=False, t2 = True):
         self.epsilon = epsilon
@@ -32,9 +49,6 @@ class RidgeEM:
         self.verbose = verbose
         self.closed_form_m_step = closed_form_m_step
         self.t2 = t2  #parameterization - if t2, tau2 follows beta prime & we maximizing in terms of tau2, else tau follows half Cauchy & we maximize for tau
-
-    def __repr__(self):
-        return f'RidgeEM(eps={self.epsilon})'
 
     @staticmethod
     def neg_q_function(theta, w, z, n, p):
@@ -130,7 +144,7 @@ class RidgeEM:
         return x.dot(self.coef_) + self.intercept_
 
 
-class RidgeLOOCV:
+class RidgeLOOCV(BaseEstimator, RegressorMixin):
 
     def __init__(self, alphas=np.logspace(-10, 10, 11, endpoint=True, base=10), fit_intercept=True, normalize=True):
         self.alphas=alphas
