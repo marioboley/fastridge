@@ -110,6 +110,27 @@ class VarianceAbsoluteError(Metric):
 
 class FittingTime(Metric):
 
+    def warn_recompute(self, existing, new_value):
+        arr = np.array(existing)
+        mean = arr.mean(axis=0)
+        se = (arr.std(axis=0, ddof=1) / np.sqrt(len(existing))
+              if len(existing) >= 2 else np.zeros_like(mean))
+        if np.any(np.abs(np.asarray(new_value) - mean) > 1.96 * se):
+            return 'FittingTime: new value outside 95% CI of existing computation(s)'
+        return None
+
+    def warn_retrieval(self, computations):
+        if len(computations) == 1:
+            return ('FittingTime: only one computation stored; reliability unknown. '
+                    'Re-run with force_recompute=True to improve estimate.')
+        means = np.array([np.mean(c['value']) for c in computations])
+        se = means.std(ddof=1) / np.sqrt(len(computations))
+        if 1.96 * se > 1.0:
+            return (f'FittingTime: cached mean unreliable '
+                    f'(95% CI width {2 * 1.96 * se:.1f}s). '
+                    'Re-run with force_recompute=True.')
+        return None
+
     @staticmethod
     def __call__(est, prob, x, y):
         return est.fitting_time_

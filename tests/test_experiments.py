@@ -82,6 +82,30 @@ def test_warn_retrieval_returns_str_on_meaningful_variation():
                                                {'value': 0.80, 'run_id': 'y'}]), str)
 
 
+def test_fitting_time_warn_recompute_tolerates_ci_variation():
+    existing = [0.5, 0.52, 0.48]
+    assert fitting_time.warn_recompute(existing, 0.51) is None
+
+
+def test_fitting_time_warn_recompute_fires_outside_ci():
+    existing = [0.5, 0.5, 0.5]
+    assert isinstance(fitting_time.warn_recompute(existing, 5.0), str)
+
+
+def test_fitting_time_warn_retrieval_single_computation():
+    assert isinstance(fitting_time.warn_retrieval([{'value': 0.5, 'run_id': 'x'}]), str)
+
+
+def test_fitting_time_warn_retrieval_narrow_ci():
+    comps = [{'value': v, 'run_id': 'x'} for v in [0.5, 0.51, 0.49]]
+    assert fitting_time.warn_retrieval(comps) is None
+
+
+def test_fitting_time_warn_retrieval_wide_ci():
+    comps = [{'value': v, 'run_id': 'x'} for v in [0.1, 10.0, 0.1]]
+    assert fitting_time.warn_retrieval(comps) is not None
+
+
 def test_pcg64_and_mt19937_differ():
     exp_mt = _simple_exp(generator='MT19937').run()
     exp_pc = _simple_exp(generator='PCG64').run()
