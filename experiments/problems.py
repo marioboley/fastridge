@@ -285,6 +285,7 @@ class PolynomialExpansion:
         return X_poly
 
 
+@dataclass(frozen=True)
 class OneHotEncodeCategories:
     """Callable value object that one-hot encodes all categorical columns.
 
@@ -312,8 +313,6 @@ class OneHotEncodeCategories:
     True
     >>> len({OneHotEncodeCategories(), OneHotEncodeCategories()})
     1
-    >>> repr(OneHotEncodeCategories())
-    'OneHotEncodeCategories()'
     """
 
     def __call__(self, X, rng):
@@ -328,15 +327,6 @@ class OneHotEncodeCategories:
                          columns=enc.get_feature_names_out(cat_cols),
                          index=X.index)
         ], axis=1)
-
-    def __eq__(self, other):
-        return isinstance(other, OneHotEncodeCategories)
-
-    def __hash__(self):
-        return hash(type(self).__name__)
-
-    def __repr__(self):
-        return 'OneHotEncodeCategories()'
 
 
 class linear_problem:
@@ -416,7 +406,7 @@ def random_problem(p, r=None, sigma_beta=1.0, sigma_eps=0.5, rng=None):
     return linear_problem(beta, sigma_eps, x_dist)
 
 
-_OHE = [OneHotEncodeCategories()]
+_OHE = (OneHotEncodeCategories(),)
 
 NEURIPS2023 = frozenset({
     EmpiricalDataProblem('abalone',          'Rings',
