@@ -1,8 +1,13 @@
+import os
+import json
 import numpy as np
 import pytest
 from fastridge import RidgeEM
 from problems import EmpiricalDataProblem, n_train_from_proportion
-from experiments import EmpiricalDataExperiment
+from experiments import (EmpiricalDataExperiment, Metric,
+                         parameter_mean_squared_error, prediction_mean_squared_error,
+                         regularization_parameter, number_of_iterations, variance_abs_error,
+                         fitting_time, prediction_r2, number_of_features)
 
 
 def _simple_exp(**kwargs):
@@ -43,6 +48,38 @@ def test_series_scope_reproducible():
     exp1.run()
     exp2.run()
     np.testing.assert_array_equal(exp1.prediction_r2_, exp2.prediction_r2_)
+
+
+def test_stat_instances_are_metric():
+    for inst in [parameter_mean_squared_error, prediction_mean_squared_error,
+                 regularization_parameter, number_of_iterations, variance_abs_error,
+                 fitting_time, prediction_r2, number_of_features]:
+        assert isinstance(inst, Metric)
+
+
+def test_warn_recompute_returns_none_when_close():
+    assert Metric().warn_recompute([0.85, 0.85, 0.85], 0.85) is None
+    assert Metric().warn_recompute([0.85, 0.85], 0.85 + 1e-9) is None
+
+
+def test_warn_recompute_returns_str_on_meaningful_change():
+    assert isinstance(Metric().warn_recompute([0.85, 0.85, 0.85], 0.84), str)
+
+
+def test_warn_recompute_series_element_wise():
+    existing = [[0.85, 0.90], [0.85, 0.90]]
+    assert Metric().warn_recompute(existing, [0.85, 0.10]) is not None
+    assert Metric().warn_recompute(existing, [0.85, 0.90]) is None
+
+
+def test_warn_retrieval_returns_none_when_consistent():
+    assert Metric().warn_retrieval([{'value': 0.85, 'run_id': 'x'},
+                                    {'value': 0.85, 'run_id': 'y'}]) is None
+
+
+def test_warn_retrieval_returns_str_on_meaningful_variation():
+    assert isinstance(Metric().warn_retrieval([{'value': 0.85, 'run_id': 'x'},
+                                               {'value': 0.80, 'run_id': 'y'}]), str)
 
 
 def test_pcg64_and_mt19937_differ():

@@ -8,7 +8,22 @@ from sklearn.metrics import mean_squared_error, r2_score
 from fastprogress.fastprogress import progress_bar
 
 
-class ParameterMeanSquaredError:
+class Metric:
+
+    def warn_recompute(self, existing, new_value):
+        mean = np.array(existing).mean(axis=0)
+        if not np.allclose(np.asarray(new_value), mean):
+            return f'{type(self).__name__}: recomputed value differs from existing mean'
+        return None
+
+    def warn_retrieval(self, computations):
+        values = np.array([np.asarray(c['value']) for c in computations])
+        if not np.allclose(values, values.mean(axis=0)):
+            return f'{type(self).__name__}: stored computations have non-negligible variation'
+        return None
+
+
+class ParameterMeanSquaredError(Metric):
 
     @staticmethod
     def __call__(est, prob, x, y):
@@ -23,7 +38,7 @@ class ParameterMeanSquaredError:
         return r'$\|\hat{\beta}-\beta\|^2/p$'
 
 
-class PredictionMeanSquaredError:
+class PredictionMeanSquaredError(Metric):
 
     @staticmethod
     def __call__(est, prob, x, y):
@@ -38,7 +53,7 @@ class PredictionMeanSquaredError:
         return r'$\|\hat{y}-y\|^2/m$'
 
 
-class RegularizationParameter:
+class RegularizationParameter(Metric):
 
     @staticmethod
     def __call__(est, prob, x, y):
@@ -53,7 +68,7 @@ class RegularizationParameter:
         return r'$\lambda$'
 
 
-class NumberOfIterations:
+class NumberOfIterations(Metric):
 
     @staticmethod
     def __call__(est, prob, x, y):
@@ -75,7 +90,7 @@ class NumberOfIterations:
         return '$k$'
 
 
-class VarianceAbsoluteError:
+class VarianceAbsoluteError(Metric):
 
     @staticmethod
     def __call__(est, prob, x, y):
@@ -93,7 +108,7 @@ class VarianceAbsoluteError:
         return r'$|\hat{\sigma}^2-\sigma^2|$'
 
 
-class FittingTime:
+class FittingTime(Metric):
 
     @staticmethod
     def __call__(est, prob, x, y):
@@ -108,7 +123,7 @@ class FittingTime:
         return r'$T_\mathrm{fit}$ [s]'
 
 
-class PredictionR2:
+class PredictionR2(Metric):
     """Computes R² between predictions and test targets.
 
     Examples
@@ -135,7 +150,7 @@ class PredictionR2:
         return r'$R^2$'
 
 
-class NumberOfFeatures:
+class NumberOfFeatures(Metric):
     """Returns the number of features used by the estimator (len of coef_).
 
     Examples
