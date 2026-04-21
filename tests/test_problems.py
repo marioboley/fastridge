@@ -26,10 +26,11 @@ def test_zero_variance_filter_default_false():
     assert EmpiricalDataProblem('diabetes', 'target').zero_variance_filter is False
 
 
-def test_zero_variance_filter_in_repr_only_when_true():
-    assert 'zero_variance_filter' not in repr(EmpiricalDataProblem('diabetes', 'target'))
+def test_zero_variance_filter_in_repr():
+    assert repr(EmpiricalDataProblem('diabetes', 'target')) == \
+        "EmpiricalDataProblem(dataset='diabetes', target='target', drop=(), nan_policy=None, x_transforms=(), y_transforms=(), zero_variance_filter=False)"
     assert repr(EmpiricalDataProblem('diabetes', 'target', zero_variance_filter=True)) == \
-        "EmpiricalDataProblem('diabetes', 'target', zero_variance_filter=True)"
+        "EmpiricalDataProblem(dataset='diabetes', target='target', drop=(), nan_policy=None, x_transforms=(), y_transforms=(), zero_variance_filter=True)"
 
 
 def test_zero_variance_filter_affects_equality():
@@ -57,9 +58,9 @@ def test_get_X_y_seeded_reproducible():
 
 def test_get_X_y_zero_variance_filter_removes_constant_columns():
     prob_no = EmpiricalDataProblem('naval_propulsion', 'GT_compressor_decay',
-                                   drop=['GT_turbine_decay'])
+                                   drop=('GT_turbine_decay',))
     prob_filt = EmpiricalDataProblem('naval_propulsion', 'GT_compressor_decay',
-                                     drop=['GT_turbine_decay'],
+                                     drop=('GT_turbine_decay',),
                                      zero_variance_filter=True)
     Xtr_no, Xte_no, _, _ = prob_no.get_X_y(50, rng=0)
     Xtr_f, Xte_f, _, _ = prob_filt.get_X_y(50, rng=0)
@@ -72,18 +73,8 @@ def test_get_X_y_zero_variance_filter_removes_constant_columns():
 
 
 def test_get_X_y_rng_threading_to_transforms():
-    X_base = pd.DataFrame({'a': np.arange(100, dtype=float),
-                           'b': np.arange(100, dtype=float)})
-    pe = PolynomialExpansion(2, max_entries=200)
-    prob = EmpiricalDataProblem.__new__(EmpiricalDataProblem)
-    prob.dataset = 'diabetes'
-    prob.target = 'target'
-    prob.drop = ()
-    prob.nan_policy = None
-    prob.x_transforms = (PolynomialExpansion(2, max_entries=50),)
-    prob.y_transforms = ()
-    prob.zero_variance_filter = False
-    prob._repr = ''
+    prob = EmpiricalDataProblem('diabetes', 'target',
+                                x_transforms=(PolynomialExpansion(2, max_entries=50),))
     Xtr1, _, _, _ = prob.get_X_y(50, rng=1)
     Xtr2, _, _, _ = prob.get_X_y(50, rng=1)
     assert list(Xtr1.columns) == list(Xtr2.columns)

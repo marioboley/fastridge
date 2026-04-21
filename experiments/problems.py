@@ -13,6 +13,7 @@ from sklearn.preprocessing import OneHotEncoder, PolynomialFeatures
 from data import get_dataset, DATASETS
 
 
+@dataclass(frozen=True)
 class EmpiricalDataProblem:
     """A prediction problem defined by a dataset and a target variable.
 
@@ -26,20 +27,20 @@ class EmpiricalDataProblem:
         Name of the dataset as registered in data.DATASETS.
     target : str
         Name of the target column.
-    drop : list of str, optional
+    drop : tuple of str, optional
         Column names to drop before returning X. Columns absent from the
         dataset are skipped with a warning.
     nan_policy : {'drop_rows', 'drop_cols'} or None, optional
         How to handle remaining NaN values after dropping rows where the
         target is NaN. 'drop_rows' drops any row with a NaN; 'drop_cols'
         drops any column with a NaN. None (default) leaves NaNs in place.
-    x_transforms : list of callable, optional
+    x_transforms : tuple of callable, optional
         Ordered sequence of callables with signature ``(X, rng)`` applied to
         X after the X/y split. ``rng`` is always a ``Generator`` or
         ``RandomState``; deterministic transforms may ignore it.
         ``OneHotEncodeCategories`` and ``PolynomialExpansion`` satisfy this
         contract.
-    y_transforms : list of callable, optional
+    y_transforms : tuple of callable, optional
         Ordered sequence of ``Series -> Series`` transforms applied to y
         after the X/y split. Numpy ufuncs (``np.log``, ``np.log1p``) satisfy
         this contract directly.
@@ -57,7 +58,7 @@ class EmpiricalDataProblem:
     Dropping columns:
 
     >>> yacht_no_froude = EmpiricalDataProblem('yacht', 'Residuary_resistance',
-    ...                                        drop=['Froude_number'])
+    ...                                        drop=('Froude_number',))
     >>> X_train, _, _, _ = yacht_no_froude.get_X_y(200)
     >>> X_train.shape[1]
     5
@@ -72,7 +73,7 @@ class EmpiricalDataProblem:
     y_transforms:
 
     >>> diabetes_log = EmpiricalDataProblem('diabetes', 'target',
-    ...                                     y_transforms=[np.log])
+    ...                                     y_transforms=(np.log,))
     >>> _, _, y_log, _ = diabetes_log.get_X_y(300, rng=0)
     >>> _, _, y_base, _ = diabetes.get_X_y(300, rng=0)
     >>> np.allclose(y_log.values, np.log(y_base.values))
@@ -82,7 +83,7 @@ class EmpiricalDataProblem:
 
     >>> ohe = EmpiricalDataProblem('automobile', 'price',
     ...                            nan_policy='drop_rows',
-    ...                            x_transforms=[OneHotEncodeCategories()])
+    ...                            x_transforms=(OneHotEncodeCategories(),))
     >>> X_train_ohe, _, _, _ = ohe.get_X_y(100)
     >>> 'fuel-type_gas' in X_train_ohe.columns
     True
@@ -90,9 +91,9 @@ class EmpiricalDataProblem:
     zero_variance_filter drops constant train columns from both splits:
 
     >>> naval = EmpiricalDataProblem('naval_propulsion', 'GT_compressor_decay',
-    ...     drop=['GT_turbine_decay'])
+    ...     drop=('GT_turbine_decay',))
     >>> naval_filt = EmpiricalDataProblem('naval_propulsion', 'GT_compressor_decay',
-    ...     drop=['GT_turbine_decay'], zero_variance_filter=True)
+    ...     drop=('GT_turbine_decay',), zero_variance_filter=True)
     >>> Xtr, _, _, _ = naval.get_X_y(50, rng=0)
     >>> std = Xtr.std()
     >>> zero_var = std[std == 0].index.tolist()
@@ -104,7 +105,7 @@ class EmpiricalDataProblem:
     >>> list(Xte_f.columns) == list(Xtr_f.columns)
     True
 
-    Value-object identity (repr-based hash and equality):
+    Value-object identity (eq and hash):
 
     >>> p1 = EmpiricalDataProblem('diabetes', 'target')
     >>> p2 = EmpiricalDataProblem('diabetes', 'target')
@@ -119,56 +120,16 @@ class EmpiricalDataProblem:
     2
     >>> EmpiricalDataProblem('diabetes', 'target').drop
     ()
-    >>> EmpiricalDataProblem('diabetes', 'target', drop=['bmi']).drop
+    >>> EmpiricalDataProblem('diabetes', 'target', drop=('bmi',)).drop
     ('bmi',)
-    >>> repr(EmpiricalDataProblem('diabetes', 'target'))
-    "EmpiricalDataProblem('diabetes', 'target')"
-    >>> repr(EmpiricalDataProblem('yacht', 'Residuary_resistance',
-    ...     drop=['Froude_number'], nan_policy='drop_rows',
-    ...     y_transforms=[np.log]))
-    "EmpiricalDataProblem('yacht', 'Residuary_resistance', drop=['Froude_number'], nan_policy='drop_rows', y_transforms=[<ufunc 'log'>])"
     """
-
-    def __init__(self, dataset, target, drop=None, nan_policy=None,
-                 x_transforms=None, y_transforms=None, zero_variance_filter=False):
-        self.dataset = dataset
-        self.target = target
-        self.drop = tuple(drop or [])
-        self.nan_policy = nan_policy
-        self.x_transforms = tuple(x_transforms or [])
-        self.y_transforms = tuple(y_transforms or [])
-        self.zero_variance_filter = zero_variance_filter
-        self._repr = (
-            f'EmpiricalDataProblem({self.dataset!r}, {self.target!r}'
-            + (f', drop={list(self.drop)!r}' if self.drop else '')
-            + (f', nan_policy={self.nan_policy!r}' if self.nan_policy else '')
-            + (f', x_transforms={list(self.x_transforms)!r}' if self.x_transforms else '')
-            + (f', y_transforms={list(self.y_transforms)!r}' if self.y_transforms else '')
-            + (', zero_variance_filter=True' if self.zero_variance_filter else '')
-            + ')'
-        )
-
-    def replace(self, **kwargs):
-        return EmpiricalDataProblem(
-            dataset=kwargs.get('dataset', self.dataset),
-            target=kwargs.get('target', self.target),
-            drop=kwargs.get('drop', list(self.drop)),
-            nan_policy=kwargs.get('nan_policy', self.nan_policy),
-            x_transforms=kwargs.get('x_transforms', list(self.x_transforms)),
-            y_transforms=kwargs.get('y_transforms', list(self.y_transforms)),
-            zero_variance_filter=kwargs.get('zero_variance_filter', self.zero_variance_filter),
-        )
-
-    def __repr__(self):
-        return self._repr
-
-    def __eq__(self, other):
-        if not isinstance(other, EmpiricalDataProblem):
-            return NotImplemented
-        return self._repr == other._repr
-
-    def __hash__(self):
-        return hash(self._repr)
+    dataset: str
+    target: str
+    drop: tuple = ()
+    nan_policy: str = None
+    x_transforms: tuple = ()
+    y_transforms: tuple = ()
+    zero_variance_filter: bool = False
 
     def get_X_y(self, n_train, rng=None):
         if not isinstance(rng, np.random.RandomState):
@@ -416,10 +377,10 @@ NEURIPS2023 = frozenset({
     EmpiricalDataProblem('automobile',       'price',
                          nan_policy='drop_rows',
                          x_transforms=_OHE,
-                         y_transforms=[np.log],
+                         y_transforms=(np.log,),
                          zero_variance_filter=True),
     EmpiricalDataProblem('autompg',          'mpg',
-                         drop=['car_name'], nan_policy='drop_rows',
+                         drop=('car_name',), nan_policy='drop_rows',
                          zero_variance_filter=True),
     EmpiricalDataProblem('blog',             'V281',
                          zero_variance_filter=True),
@@ -428,7 +389,7 @@ NEURIPS2023 = frozenset({
     EmpiricalDataProblem('concrete',         'Concrete compressive strength',
                          zero_variance_filter=True),
     EmpiricalDataProblem('crime',            'ViolentCrimesPerPop',
-                         drop=['state', 'fold', 'communityname'],
+                         drop=('state', 'fold', 'communityname'),
                          nan_policy='drop_cols',
                          zero_variance_filter=True),
     EmpiricalDataProblem('ct_slices',        'reference',
@@ -438,32 +399,32 @@ NEURIPS2023 = frozenset({
     EmpiricalDataProblem('eye',              'y',
                          zero_variance_filter=True),
     EmpiricalDataProblem('facebook',         'Total Interactions',
-                         drop=['comment', 'like', 'share'],
+                         drop=('comment', 'like', 'share'),
                          nan_policy='drop_rows',
                          x_transforms=_OHE,
                          zero_variance_filter=True),
     EmpiricalDataProblem('forest',           'area',
                          x_transforms=_OHE,
-                         y_transforms=[np.log1p],
+                         y_transforms=(np.log1p,),
                          zero_variance_filter=True),
     EmpiricalDataProblem('naval_propulsion', 'GT_compressor_decay',
-                         drop=['GT_turbine_decay'],
+                         drop=('GT_turbine_decay',),
                          zero_variance_filter=True),
     EmpiricalDataProblem('naval_propulsion', 'GT_turbine_decay',
-                         drop=['GT_compressor_decay'],
+                         drop=('GT_compressor_decay',),
                          zero_variance_filter=True),
     EmpiricalDataProblem('parkinsons',       'motor_UPDRS',
-                         drop=['total_UPDRS'],
+                         drop=('total_UPDRS',),
                          zero_variance_filter=True),
     EmpiricalDataProblem('parkinsons',       'total_UPDRS',
-                         drop=['motor_UPDRS'],
+                         drop=('motor_UPDRS',),
                          zero_variance_filter=True),
     EmpiricalDataProblem('real_estate',      'Y house price of unit area',
                          zero_variance_filter=True),
     EmpiricalDataProblem('ribo',             'y',
                          zero_variance_filter=True),
     EmpiricalDataProblem('student',          'G3',
-                         drop=['G1', 'G2'],
+                         drop=('G1', 'G2'),
                          x_transforms=_OHE,
                          zero_variance_filter=True),
     EmpiricalDataProblem('tomshw',           'V97',
@@ -471,20 +432,20 @@ NEURIPS2023 = frozenset({
     EmpiricalDataProblem('twitter',          'V78',
                          zero_variance_filter=True),
     EmpiricalDataProblem('yacht',            'Residuary_resistance',
-                         y_transforms=[np.log],
+                         y_transforms=(np.log,),
                          zero_variance_filter=True),
 })
 
 
 NEURIPS2023_D2 = frozenset(
-    p.replace(x_transforms=p.x_transforms + (PolynomialExpansion(2),))
+    dataclasses.replace(p, x_transforms=p.x_transforms + (PolynomialExpansion(2),))
     for p in NEURIPS2023
     if 'p' in DATASETS[p.dataset]
     and DATASETS[p.dataset]['p'] < 1000
 )
 
 NEURIPS2023_D3 = frozenset(
-    p.replace(x_transforms=p.x_transforms + (PolynomialExpansion(3),))
+    dataclasses.replace(p, x_transforms=p.x_transforms + (PolynomialExpansion(3),))
     for p in NEURIPS2023
     if 'p' in DATASETS[p.dataset]
     and 'n' in DATASETS[p.dataset]
