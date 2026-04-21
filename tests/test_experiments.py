@@ -2,6 +2,7 @@ import os
 import json
 import numpy as np
 import pytest
+import experiments
 from fastridge import RidgeEM
 from problems import EmpiricalDataProblem, n_train_from_proportion
 from experiments import (EmpiricalDataExperiment, Metric,
@@ -80,6 +81,53 @@ def test_warn_retrieval_returns_none_when_consistent():
 def test_warn_retrieval_returns_str_on_meaningful_variation():
     assert isinstance(Metric().warn_retrieval([{'value': 0.85, 'run_id': 'x'},
                                                {'value': 0.80, 'run_id': 'y'}]), str)
+
+
+from experiments import (_cache_key, _load_metric_file, _save_metric_file,
+                         _make_run_id, _write_run_file)
+
+
+def test_cache_key_format():
+    key = _cache_key(EmpiricalDataProblem('diabetes', 'target'))
+    assert key.startswith('EmpiricalDataProblem__')
+    assert len(key.split('__')[1]) > 0
+
+
+# tmp_path: pytest built-in fixture providing an isolated temporary directory
+# https://docs.pytest.org/en/stable/how-to/tmp_path.html
+def test_load_metric_file_missing(tmp_path):
+    data = _load_metric_file(str(tmp_path / 'missing.json'))
+    assert data == {'computations': [], 'retrievals': []}
+
+
+def test_save_load_metric_file_roundtrip(tmp_path):
+    path = str(tmp_path / 'sub' / 'm.json')
+    original = {'computations': [{'value': 0.85, 'run_id': 'abc'}], 'retrievals': []}
+    _save_metric_file(path, original)
+    assert _load_metric_file(path) == original
+
+
+def test_make_run_id_format():
+    parts = _make_run_id().split('-')
+    assert len(parts) == 3
+    assert len(parts[0]) == 8
+    assert len(parts[1]) == 6
+    assert len(parts[2]) == 4
+
+
+# monkeypatch: pytest built-in fixture for temporarily patching module attributes
+# https://docs.pytest.org/en/stable/how-to/monkeypatch.html
+def test_write_run_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(experiments, 'CACHE_DIR', str(tmp_path))
+    run_id = _make_run_id()
+    _write_run_file(run_id, {'problems': []},
+                    {'trials_computed': 0, 'trials_retrieved': 0})
+    path = os.path.join(str(tmp_path), 'runs', f'{run_id}.json')
+    assert os.path.exists(path)
+    with open(path) as f:
+        data = json.load(f)
+    assert data['run_id'] == run_id
+    assert 'python' in data['environment']
 
 
 def test_fitting_time_warn_recompute_tolerates_ci_variation():

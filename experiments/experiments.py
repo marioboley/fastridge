@@ -1,11 +1,77 @@
 import time
 import warnings
+import json
+import os
+import tempfile
+import datetime
+import random
+import string
+import sys
+import platform
 import numpy as np
 import pandas as pd
+import joblib
 from sklearn.base import clone
 from sklearn.linear_model import Ridge, LinearRegression
 from sklearn.metrics import mean_squared_error, r2_score
 from fastprogress.fastprogress import progress_bar
+
+
+CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'results')
+
+
+def _cache_key(obj):
+    return f'{type(obj).__name__}__{joblib.hash(obj)}'
+
+
+def _series_dir(prob_key, n_train, est_key, reps, generator, seed):
+    return os.path.join(CACHE_DIR, 'series', prob_key, str(n_train),
+                        est_key, str(reps), generator, str(seed))
+
+
+def _trial_dir(prob_key, n_train, est_key, generator, trial_seed):
+    return os.path.join(CACHE_DIR, 'trial', prob_key, str(n_train),
+                        est_key, generator, str(trial_seed))
+
+
+def _load_metric_file(path):
+    if not os.path.exists(path):
+        return {'computations': [], 'retrievals': []}
+    with open(path) as f:
+        return json.load(f)
+
+
+def _save_metric_file(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path))
+    try:
+        with os.fdopen(fd, 'w') as f:
+            json.dump(data, f)
+        os.replace(tmp, path)
+    except Exception as e:
+        os.unlink(tmp)
+        warnings.warn(f'Cache write failed for {path}: {e}')
+
+
+def _make_run_id():
+    ts = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+    suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+    return f'{ts}-{suffix}'
+
+
+def _write_run_file(run_id, exp_spec, summary):
+    data = {
+        'run_id': run_id,
+        'timestamp': datetime.datetime.now().isoformat(),
+        'environment': {
+            'python': sys.version.split()[0],
+            'platform': platform.platform(),
+        },
+        'experiment_spec': exp_spec,
+        'summary': summary,
+    }
+    path = os.path.join(CACHE_DIR, 'runs', f'{run_id}.json')
+    _save_metric_file(path, data)
 
 
 class Metric:
