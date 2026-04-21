@@ -132,4 +132,12 @@ dmypy.json
 # Figure output
 output/*
 !output/.gitkeep
-!output/*.pdf
+!output/tutorial_figure1.pdf
+!output/tutorial_figure2.pdf
+!output/tutorial_figure3.pdf
+!output/tutorial_figure4.pdf
+!output/paper2023_figure1.pdf
+!output/paper2023_figure2.pdf
+!output/paper2023_figure3.pdf
+!output/realdata_r2_by_degree.pdf
+!output/paper2023_table2.csv
