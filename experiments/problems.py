@@ -1,7 +1,9 @@
 """
 Problem classes for simulated and empirical data experiments.
 """
+import dataclasses
 import warnings
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -224,6 +226,7 @@ def n_train_from_proportion(problems, prop=0.7):
     return np.array([int(DATASETS[p.dataset]['n'] * prop) for p in problems])
 
 
+@dataclass(frozen=True)
 class PolynomialExpansion:
     """Callable value object that applies polynomial feature expansion.
 
@@ -252,10 +255,6 @@ class PolynomialExpansion:
     False
     >>> len({PolynomialExpansion(2), PolynomialExpansion(2)})
     1
-    >>> repr(PolynomialExpansion(2))
-    'PolynomialExpansion(2)'
-    >>> repr(PolynomialExpansion(2, max_entries=1000))
-    'PolynomialExpansion(2, max_entries=1000)'
 
     With subsampling: total columns = ceil(max_entries / n).
     >>> small = PolynomialExpansion(2, max_entries=9)
@@ -265,10 +264,8 @@ class PolynomialExpansion:
     >>> 'a' in result.columns and 'b' in result.columns
     True
     """
-
-    def __init__(self, degree, max_entries=50_000_000):
-        self.degree = degree
-        self.max_entries = max_entries
+    degree: int
+    max_entries: int = 50_000_000
 
     def __call__(self, X, rng):
         poly = PolynomialFeatures(degree=self.degree, include_bias=False)
@@ -286,18 +283,6 @@ class PolynomialExpansion:
             sampled = sorted(rng.choice(len(interaction_cols), size=pnew, replace=False))
             return X_poly[linear_cols + [interaction_cols[i] for i in sampled]]
         return X_poly
-
-    def __eq__(self, other):
-        return isinstance(other, PolynomialExpansion) and \
-               (self.degree, self.max_entries) == (other.degree, other.max_entries)
-
-    def __hash__(self):
-        return hash((type(self).__name__, self.degree, self.max_entries))
-
-    def __repr__(self):
-        if self.max_entries == 50_000_000:
-            return f'PolynomialExpansion({self.degree})'
-        return f'PolynomialExpansion({self.degree}, max_entries={self.max_entries})'
 
 
 class OneHotEncodeCategories:
@@ -502,14 +487,14 @@ NEURIPS2023 = frozenset({
 
 
 NEURIPS2023_D2 = frozenset(
-    p.replace(x_transforms=list(p.x_transforms) + [PolynomialExpansion(2)])
+    p.replace(x_transforms=p.x_transforms + (PolynomialExpansion(2),))
     for p in NEURIPS2023
     if 'p' in DATASETS[p.dataset]
     and DATASETS[p.dataset]['p'] < 1000
 )
 
 NEURIPS2023_D3 = frozenset(
-    p.replace(x_transforms=list(p.x_transforms) + [PolynomialExpansion(3)])
+    p.replace(x_transforms=p.x_transforms + (PolynomialExpansion(3),))
     for p in NEURIPS2023
     if 'p' in DATASETS[p.dataset]
     and 'n' in DATASETS[p.dataset]
