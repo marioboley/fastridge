@@ -416,6 +416,145 @@ class Experiment:
         return self
 
 
+class ExperimentWithPerSeriesSeeding:
+    """Run repeated train/test experiments with per-series MT19937 seeding.
+
+    Numerically identical to EmpiricalDataExperiment(generator='MT19937',
+    seed_scope='series', seed_progression='fixed') at the same seed. Results
+    are cached per (problem, n_train, estimator, reps, seed).
+
+    Parameters
+    ----------
+    problems : list of EmpiricalDataProblem
+    estimators : list of estimator objects
+    reps : int
+    ns : array-like of shape (n_problems, n_sizes)
+        A 1-D input is broadcast to all problems.
+    seed : int or None
+    stats : list of Metric or None
+    est_names : list of str or None
+    verbose : bool, default True
+    """
+
+    def __init__(self, problems, estimators, reps, ns,
+                 seed=None, stats=None, est_names=None, verbose=True):
+        self.problems = problems
+        self.estimators = estimators
+        self.reps = reps
+        self.ns = np.atleast_2d(ns)
+        if len(self.ns) != len(self.problems):
+            self.ns = self.ns.repeat(len(self.problems), axis=0)
+        self.seed = seed
+        self.stats = empirical_default_stats if stats is None else stats
+        self.est_names = [str(e) for e in estimators] if est_names is None else est_names
+        self.verbose = verbose
+
+    def _series_cache_dir(self, prob_idx, n_idx, est_idx):
+        return os.path.join(
+            CACHE_DIR, 'series',
+            _cache_key(self.problems[prob_idx]),
+            str(int(self.ns[prob_idx][n_idx])),
+            _cache_key(self.estimators[est_idx]),
+            str(self.reps),
+            str(self.seed),
+        )
+
+    def _all_stats_in_series_cache(self, prob_idx, n_idx, est_idx):
+        d = self._series_cache_dir(prob_idx, n_idx, est_idx)
+        return all(
+            _load_metric_file(os.path.join(d, str(stat) + '.json'))['computations']
+            for stat in self.stats
+        )
+
+    def _retrieve_series(self, prob_idx, n_idx, est_idx):
+        d = self._series_cache_dir(prob_idx, n_idx, est_idx)
+        for stat in self.stats:
+            path = os.path.join(d, str(stat) + '.json')
+            data = _load_metric_file(path)
+            values = [np.asarray(c['value']) for c in data['computations']]
+            mean_val = np.mean(values, axis=0)
+            self.__dict__[str(stat) + '_'][:, prob_idx, n_idx, est_idx] = mean_val
+            serialisable = mean_val.tolist() if hasattr(mean_val, 'tolist') else float(mean_val)
+            data['retrievals'].append({'value': serialisable, 'run_id': self.run_id_})
+            _save_metric_file(path, data)
+            msg = stat.warn_retrieval(data['computations'])
+            if msg:
+                warnings.warn(msg)
+
+    def _run_series(self, prob_idx, n_idx, est_idx):
+        problem = self.problems[prob_idx]
+        n_train = int(self.ns[prob_idx][n_idx])
+        rng = np.random.RandomState(self.seed)
+        self._last_series_values = {str(stat): [] for stat in self.stats}
+        for rep_idx in range(self.reps):
+            X_train, X_test, y_train, y_test = problem.get_X_y(n_train, rng=rng)
+            _est = clone(self.estimators[est_idx], safe=False)
+            try:
+                t0 = time.time()
+                _est.fit(X_train, y_train)
+                _est.fitting_time_ = time.time() - t0
+            except Exception as e:
+                warnings.warn(f"rep {rep_idx} failed for '{self.est_names[est_idx]}'"
+                              f" on '{problem.dataset}': {e}")
+                for stat in self.stats:
+                    self._last_series_values[str(stat)].append(float('nan'))
+                continue
+            for stat in self.stats:
+                val = stat(_est, problem, X_test, y_test)
+                self.__dict__[str(stat) + '_'][rep_idx, prob_idx, n_idx, est_idx] = val
+                self._last_series_values[str(stat)].append(
+                    val.tolist() if hasattr(val, 'tolist') else float(val))
+
+    def _write_series(self, prob_idx, n_idx, est_idx):
+        d = self._series_cache_dir(prob_idx, n_idx, est_idx)
+        for stat in self.stats:
+            path = os.path.join(d, str(stat) + '.json')
+            data = _load_metric_file(path)
+            new_values = self._last_series_values[str(stat)]
+            if data['computations']:
+                existing = [np.asarray(c['value']) for c in data['computations']]
+                msg = stat.warn_recompute(existing, np.asarray(new_values))
+                if msg:
+                    warnings.warn(msg)
+            data['computations'].append({'value': new_values, 'run_id': self.run_id_})
+            _save_metric_file(path, data)
+
+    def run(self, force_recompute=False, ignore_cache=False):
+        n_problems = len(self.problems)
+        n_sizes = len(self.ns[0])
+        n_estimators = len(self.estimators)
+        for stat in self.stats:
+            self.__dict__[str(stat) + '_'] = np.full(
+                (self.reps, n_problems, n_sizes, n_estimators), np.nan)
+        self.run_id_ = _make_run_id()
+        trials_computed = trials_retrieved = 0
+        for prob_idx in range(n_problems):
+            if self.verbose:
+                print(self.problems[prob_idx].dataset, end=' ')
+            for n_idx in range(n_sizes):
+                for est_idx in range(n_estimators):
+                    if (not force_recompute and not ignore_cache
+                            and self._all_stats_in_series_cache(prob_idx, n_idx, est_idx)):
+                        self._retrieve_series(prob_idx, n_idx, est_idx)
+                        trials_retrieved += self.reps
+                    else:
+                        self._run_series(prob_idx, n_idx, est_idx)
+                        if not ignore_cache:
+                            self._write_series(prob_idx, n_idx, est_idx)
+                        trials_computed += self.reps
+            if self.verbose:
+                print()
+        if not ignore_cache:
+            _write_run_file(self.run_id_, {
+                'problems': [_cache_key(p) for p in self.problems],
+                'estimators': [_cache_key(e) for e in self.estimators],
+                'ns': self.ns.tolist(),
+                'reps': self.reps,
+                'seed': self.seed,
+            }, {'trials_computed': trials_computed, 'trials_retrieved': trials_retrieved})
+        return self
+
+
 class RidgePathExperiment:
 
     def __init__(self, x_train, y_train, x_test, y_test, alphas,

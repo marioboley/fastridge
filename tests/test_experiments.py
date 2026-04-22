@@ -6,7 +6,7 @@ import experiments
 from fastridge import RidgeEM
 from problems import EmpiricalDataProblem, n_train_from_proportion
 from neurips2023 import SyntheticDataExperiment
-from experiments import (EmpiricalDataExperiment, Experiment, Metric,
+from experiments import (EmpiricalDataExperiment, Experiment, ExperimentWithPerSeriesSeeding, Metric,
                          parameter_mean_squared_error, prediction_mean_squared_error,
                          regularization_parameter, number_of_iterations, variance_abs_error,
                          fitting_time, prediction_r2, number_of_features)
@@ -212,3 +212,45 @@ def test_new_experiment_run_file_written(tmp_path, monkeypatch):
     monkeypatch.setattr(experiments, 'CACHE_DIR', str(tmp_path))
     _simple_new_exp().run()
     assert len(os.listdir(os.path.join(str(tmp_path), 'runs'))) == 1
+
+
+def _simple_series_exp(**kwargs):
+    prob = EmpiricalDataProblem('diabetes', 'target', zero_variance_filter=True)
+    ns = n_train_from_proportion([prob])
+    defaults = dict(seed=1, verbose=False)
+    defaults.update(kwargs)
+    return ExperimentWithPerSeriesSeeding([prob], [RidgeEM()], reps=2, ns=ns, **defaults)
+
+
+def test_series_exp_result_shape():
+    assert _simple_series_exp().run(ignore_cache=True).prediction_r2_.shape == (2, 1, 1, 1)
+
+
+def test_series_exp_cache_hit(tmp_path, monkeypatch):
+    monkeypatch.setattr(experiments, 'CACHE_DIR', str(tmp_path))
+    exp1 = _simple_series_exp().run()
+    exp2 = _simple_series_exp().run()
+    np.testing.assert_array_equal(exp1.prediction_r2_, exp2.prediction_r2_)
+
+
+def test_series_exp_ignore_cache(tmp_path, monkeypatch):
+    monkeypatch.setattr(experiments, 'CACHE_DIR', str(tmp_path))
+    _simple_series_exp().run(ignore_cache=True)
+    assert not os.path.exists(os.path.join(str(tmp_path), 'series'))
+
+
+def test_series_exp_numerical_equivalence():
+    # ExperimentWithPerSeriesSeeding must reproduce EmpiricalDataExperiment
+    # with generator='MT19937', seed_scope='series', seed_progression='fixed' exactly.
+    prob = EmpiricalDataProblem('diabetes', 'target', zero_variance_filter=True)
+    ns = n_train_from_proportion([prob])
+    legacy = EmpiricalDataExperiment(
+        [prob], [RidgeEM()], reps=2, ns=ns,
+        seed=1, generator='MT19937', seed_scope='series',
+        seed_progression='fixed', verbose=False)
+    new = ExperimentWithPerSeriesSeeding(
+        [prob], [RidgeEM()], reps=2, ns=ns,
+        seed=1, verbose=False)
+    legacy.run()
+    new.run(ignore_cache=True)
+    np.testing.assert_array_equal(legacy.prediction_r2_, new.prediction_r2_)
