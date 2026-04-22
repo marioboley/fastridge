@@ -15,10 +15,10 @@ No changes to `problems.py` are made by this spec.
 
 ## Goal
 
-Add optional result caching to `EmpiricalDataExperiment` so that re-running with a
-modified estimator list only recomputes affected units, reusing stored results for
-everything else. Eliminates the need to rerun full experiments (currently >1 h) when
-iterating on a subset of estimators.
+Add result caching to `EmpiricalDataExperiment` so that re-running with a modified
+estimator list only recomputes affected units, reusing stored results for everything
+else. Eliminates the need to rerun full experiments (currently >1 h) when iterating
+on a subset of estimators.
 
 ---
 
@@ -32,83 +32,25 @@ combination, stored as a 1-D array of length `reps` per metric.
 
 ---
 
-## Seeding
+## Seeding and Cache Paths
 
-Seeding behaviour is controlled by three orthogonal parameters on
-`EmpiricalDataExperiment`:
+Seeding parameters (`generator`, `seed_scope`, `seed_progression`) are defined in
+the [seeding refactor design](2026-04-18-empirical-experiment-seeding-refactor-design.md).
+This section covers only how those parameters determine cache directory paths.
 
-### `generator`
+The top-level folder is determined by `seed_scope`: `'series'` -> `series/`,
+`'trial'` -> `trial/`. A `series/` entry is fully keyed by
+`(problem, estimator, n_train, reps, generator, seed)` — `seed_progression` plays
+no role in the path. A `trial/` entry uses `seed + rep_idx` as the trial seed:
 
-*Which* numpy BitGenerator is used:
+| `seed_scope` | Cache path | Cache granularity |
+|---|---|---|
+| `'series'` | `series/.../` | all reps together per estimator |
+| `'trial'` | `trial/.../` | one rep at a time per estimator |
+| `'experiment'` | `experiment/` | whole result array (future, see Future) |
 
-- `'PCG64'` — `np.random.Generator(np.random.PCG64(seed))`. Default.
-- `'MT19937'` — `np.random.RandomState(seed)`. Numerically equivalent to the
-  legacy `np.random.seed` + `np.random.choice` path for datasets without
-  polynomial subsampling.
-
-### `seed_scope`
-
-*When* the seed is applied:
-
-- `'series'` — seed is reset once per problem, before that problem's rep loop.
-  Default.
-- `'trial'` — seed is reset once per rep, inside the rep loop, before the split.
-- `'experiment'` — seed is set once and a single RNG object advances through
-  everything.
-
-### `seed_progression`
-
-*What value* is used at each scope boundary:
-
-- `'fixed'` — always use `seed`. Default (gives the same split sequence for
-  every problem under `seed_scope='series'`).
-- `'sequential'` — use `seed + unit_idx`, where `unit_idx` is the rep index for
-  `seed_scope='trial'` or the problem index for `seed_scope='series'`.
-
-### Defaults and legacy equivalence
-
-Default: `generator='MT19937', seed_scope='series', seed_progression='fixed'`.
-This is numerically identical to the current implementation (for datasets without
-polynomial subsampling) — no existing notebook needs to change.
-
-### Legacy vs. forward-looking scopes
-
-`seed_scope='trial'` is the forward-looking mode. It offers the finest cache
-granularity: individual reps can be added or recomputed independently, and
-estimators can be added without disturbing existing results. It also extends
-naturally to randomised estimators — since each estimator has its own
-`<estimator_key>/<trial_seed>` path, passing `trial_seed` directly as an integer
-`random_state` gives each estimator independent, reproducible randomness with no
-coupling to the data split. This works with sklearn estimators using either
-generator.
-
-`seed_scope='series'` is a legacy mode required to cache the NeurIPS 2023 empirical
-results, which were computed with per-problem seeding. Adding estimators is still
-possible (new estimator key = new directory), but extending reps requires
-recomputing the whole series since all reps are stored together. Individual trial
-RNG states are not independently derivable from the base seed.
-
-`seed_scope='experiment'` is a legacy mode required to cache the NeurIPS 2023
-synthetic results (`Experiment` runner), which use a single advancing RNG across
-the whole run. Only whole-experiment caching is possible. This is still valuable
-beyond legacy reproduction: caching the full result array means plotting, table
-generation, and other analysis code can be iterated freely without rerunning
-expensive computations.
-
-### Caching support by scope
-
-The cache folder is determined by `seed_scope`. Within that, the seed value used in
-the path is determined by `seed_progression`:
-
-| `seed_scope` | `seed_progression` | File seed value | Cache granularity |
-|---|---|---|---|
-| `'series'` | `'fixed'` | `seed` | all reps together per estimator (legacy) |
-| `'series'` | `'sequential'` | `seed + prob_idx` | all reps together per estimator (legacy) |
-| `'trial'` | `'sequential'` | `seed + rep_idx` | one rep at a time per estimator |
-
-`generator` affects both the path (via a `<generator>/` directory level) and the
-numerical results — two runs with the same seed but different generators produce
-different splits and must be stored separately.
+`generator` appears as a `<generator>/` directory level — the same seed with a
+different generator produces different splits and must be stored separately.
 
 ---
 
@@ -117,30 +59,31 @@ different splits and must be stored separately.
 ### Global cache directory
 
 `CACHE_DIR` is a module-level constant in `experiments.py`, defaulting to the
-`results/` directory at the repository root. Notebooks can override it:
+`results/` directory at the repository root. Every `run()` call reads from and
+writes to `CACHE_DIR` unless `ignore_cache=True`.
 
-```python
-import experiments
-experiments.CACHE_DIR = '/path/to/custom/cache'
-```
+### `force_recompute` and `ignore_cache` parameters on `run()`
 
-Caching is always active — there is no opt-in flag. When `CACHE_DIR` is set (which
-it always is by default), every `run()` call reads from and writes to the cache.
+`run(force_recompute=False)` — when `True`, recomputes all trials/series and
+appends results to the existing cache files rather than reading from them. Useful
+when an estimator implementation has changed without its `get_params()` output
+changing. The full computation history is retained.
 
-### `overwrite` parameter on `run()`
-
-`run(overwrite=False)` — when `True`, recomputes all trials/series and overwrites
-existing cache files. Useful when an estimator implementation has changed without
-its `get_params()` output changing.
+`run(ignore_cache=False)` — when `True`, disables both reads and writes entirely.
+The run executes as if no cache exists and produces no cached output. Intended for
+unit tests and preview cells where cache pollution would be undesirable.
 
 ### Behaviour during `run()`
 
 For each (problem, estimator) pair:
 
 1. Derive the cache key (see below).
-2. Check whether the corresponding file exists under `CACHE_DIR`.
-3. **Hit**: load the stored result and place it into `self.result_`. Skip fitting.
-4. **Miss** (or `overwrite=True`): fit the estimator, record results, write file.
+2. If `ignore_cache=True`: fit, store result in `self.result_`, skip all file I/O.
+3. Check whether the corresponding metric file exists under `CACHE_DIR`.
+4. **Hit** (and `force_recompute=False`): load stored result; place into
+   `self.result_`. Skip fitting. Record retrieval in the metric file.
+5. **Miss** (or `force_recompute=True`): fit the estimator, record results,
+   append to metric file.
 
 ---
 
@@ -148,58 +91,133 @@ For each (problem, estimator) pair:
 
 ```
 results/
-  per_series/
+  series/
     <problem_key>/
       <n_train>/
         <estimator_key>/
           <reps>/
             <generator>/
               <base_seed>/
-                metrics.npz       <- one key per metric, arrays of shape (reps,)
-                predictions/      <- (future) one .npy per rep
-                estimators/       <- (future) one .pkl per rep
-                meta.json         <- (future) per-series metadata
-  per_trial/
+                <metric_name>.json  <- one file per metric
+                predictions/        <- (future) one .npy per rep
+                estimators/         <- (future) one .pkl per rep
+  trial/
     <problem_key>/
       <n_train>/
         <estimator_key>/
           <generator>/
             <trial_seed>/
-              metrics.npz         <- one key per metric, scalar values
-              predictions.npy     <- (future) y_pred array for this trial
-              estimator.pkl       <- (future) fitted estimator for this trial
-              meta.json           <- (future) per-trial metadata
-  runs/                           <- (future) one file per experiment run
+              <metric_name>.json    <- one file per metric
+              predictions.npy       <- (future) y_pred array for this trial
+              estimator.pkl         <- (future) fitted estimator for this trial
+  runs/
+    <run_id>.json                   <- one file per experiment run
 ```
 
 The top-level subfolder is determined by `seed_scope` alone: `'series'` ->
-`per_series/`, `'trial'` -> `per_trial/`. `<n_train>/` captures the actual training
+`series/`, `'trial'` -> `trial/`. `<n_train>/` captures the actual training
 set size — two experiments on the same problem with different `n_train` values
 produce separate paths. `<reps>/` means series of different lengths coexist without
 conflict. `<generator>/` separates results from different BitGenerators since the
 same seed produces different numerical outcomes across generators. Using a directory
-per trial/series rather than a flat file allows future artifact types to be added
-without changing the key structure.
+per trial/series allows future artifact types to be added without changing the key
+structure. One JSON file per metric (rather than one combined archive) means adding
+or removing a metric from `stats` only affects that metric's file; all others are
+unmodified.
 
-### Storage format: `.npz`
+### Storage format: per-metric JSON
 
-`.npz` is NumPy's compressed archive format. Internally it is a ZIP file containing
-one `.npy` binary file per named array, written with `np.savez_compressed` and read
-back with `np.load`. It requires no extra dependency (NumPy is already required) and
-is efficient for numerical arrays of any shape. Limitations: no partial read/write
-(the whole file is loaded at once), and non-array data (strings, dicts) require
-wrapping. For comparison: HDF5 (`h5py`) supports hierarchical storage and partial
-reads but adds a dependency; JSON is suitable for metadata but not arrays; pickle is
-flexible but Python-only and not safe for untrusted input. For metric arrays,
-`.npz` is the right default.
+Each `<metric_name>.json` file stores the full computation and retrieval history for
+that metric at a single (problem, estimator, n_train, ...) path.
 
-`metrics.npz` stores one key per metric (e.g. `prediction_r2`, `fitting_time`):
-- `per_series/` files: array of shape `(reps,)` — one value per rep
-- `per_trial/` files: scalar — the single rep result
+**`trial/` example** (scalar value per computation):
 
-Storing metrics as separate keys means adding or removing a metric from `stats` only
-invalidates that metric's values; all other metrics are reused. `n_train` is encoded
-in the directory path, not inside the file.
+```json
+{
+  "computations": [
+    {"value": 0.851, "run_id": "20260421-143045-a3f7"},
+    {"value": 0.849, "run_id": "20260423-091200-b2c1"}
+  ],
+  "retrievals": [
+    {"value": 0.850, "run_id": "20260422-110305-c9d0"}
+  ]
+}
+```
+
+**`series/` example** (array of length `reps` per computation):
+
+```json
+{
+  "computations": [
+    {"value": [0.851, 0.843, 0.867, 0.859, 0.872], "run_id": "20260421-143045-a3f7"}
+  ],
+  "retrievals": [
+    {"value": [0.851, 0.843, 0.867, 0.859, 0.872], "run_id": "20260422-110305-c9d0"}
+  ]
+}
+```
+
+- `computations`: ordered list of all past computed results, each with the value and
+  the run that produced it. New entries are appended; existing entries are never
+  modified.
+- `retrievals`: list of cache-hit records. Each entry stores the run ID and the mean
+  value that was returned to that run (which may differ across retrievals as more
+  computations are appended). Added on cache hit.
+- The value used when populating `self.result_` is the **mean across all
+  computations** — a scalar for `trial/`, a per-rep mean array for `series/`.
+
+Files are written atomically (write to a temp path, then `os.replace`) to avoid
+corruption on interrupted runs. JSON requires no extra dependency and is human-
+readable; the storage overhead for typical metric arrays is negligible relative to
+fitting time.
+
+---
+
+## Metric Warning Behavior
+
+When a result is recomputed or retrieved from cache, the runner checks it against
+stored history and issues warnings if the value is unexpectedly inconsistent. Each
+stat class defines its own tolerance for what counts as inconsistent. All existing
+stats are already class instances. This design introduces a `Metric`
+base class in `experiments.py` that all stat classes will inherit from. The runner
+parameter stays named `stats`. Each `Metric` subclass may override:
+
+```python
+def warn_recompute(self, existing, new_value):
+    """Return a warning message if new_value is surprising given existing
+    computations, or None. Called only when len(existing) >= 1."""
+
+def warn_retrieval(self, computations):
+    """Return a warning message about the reliability of the cached mean,
+    or None. Called on every cache hit regardless of len(computations)."""
+```
+
+`existing` and `computations` are lists of scalar values (for `trial/`) or lists of
+arrays of length `reps` (for `series/`). For `series/`, both methods apply checks
+element-wise and warn if any rep triggers the condition.
+
+### Default behavior (`Metric` base class)
+
+`warn_recompute` warns if the new value is not close to the mean of existing values
+(`np.allclose` with default tolerances). `warn_retrieval` warns if stored computation
+values are not all close to their mean. This avoids false positives from negligible
+floating-point differences due to minor library changes, while catching real
+discrepancies. Both are element-wise for `series/` values.
+
+This is the right default for deterministic stats like `PredictionR2` — any
+discrepancy indicates non-determinism.
+
+### `FittingTime`
+
+Fitting time is inherently variable; the default exact-equality checks would fire
+constantly. `FittingTime` overrides both methods with CI-based checks:
+
+- `warn_recompute`: warn if the new value falls outside the 95% CI of existing
+  values (mean +/- 1.96 * SE, SE = std / sqrt(n)).
+- `warn_retrieval`:
+  - If only one computation is stored: warn that reliability cannot be assessed and
+    recommend re-running with `force_recompute=True`.
+  - If two or more: warn if 1.96 * SE > 1 s across computation means.
 
 ---
 
@@ -234,30 +252,77 @@ Example: `EmpiricalDataProblem__8db1480a05fa91f6a3a86c57bb4f6af7`
 
 ## Changes to `EmpiricalDataExperiment`
 
-### New constructor parameters
+Seeding parameters (`generator`, `seed_scope`, `seed_progression`) are added by the
+prerequisite seeding refactor. This spec adds:
+
+### New `run()` parameters
 
 ```python
-EmpiricalDataExperiment(
-    problems, estimators, reps, ns,
-    seed=None,
-    generator='PCG64',        # new: 'PCG64' | 'MT19937'
-    seed_scope='series',      # new: 'series' | 'trial' | 'experiment'
-    seed_progression='fixed', # new: 'fixed' | 'sequential'
-    stats=None, est_names=None, verbose=True
-)
+run(force_recompute=False, ignore_cache=False)
 ```
 
-See the [seeding refactor design](2026-04-18-empirical-experiment-seeding-refactor-design.md)
-for the full loop structure and `_make_rng` implementation.
+### New module constant
+
+```python
+CACHE_DIR = os.path.join(os.path.dirname(__file__), '..', 'results')
+```
+
+### `Metric` base class
+
+All existing stat classes inherit from a new `Metric` base class (see Metric Warning
+Behavior). The runner parameter stays named `stats`.
+
+---
+
+## Run File
+
+Each call to `run()` writes a file to `results/runs/<run_id>.json`. The run ID is a
+timestamp with a short random suffix to avoid collisions: `20260421-143045-a3f7`.
+
+```json
+{
+  "run_id": "20260421-143045-a3f7",
+  "timestamp": "2026-04-21T14:30:45",
+  "environment": {
+    "python": "3.11.5",
+    "platform": "macOS-15.3.0-arm64"
+  },
+  "experiment_spec": {
+    "problems": ["EmpiricalDataProblem__8db1480a", "..."],
+    "estimators": ["RidgeEM__3f2a91c0", "RidgeLOOCV__7d4b2e11"],
+    "ns": [50, 100, 200],
+    "reps": 20,
+    "seed": 0,
+    "generator": "MT19937",
+    "seed_scope": "series"
+  },
+  "summary": {
+    "trials_computed": 42,
+    "trials_retrieved": 18
+  }
+}
+```
+
+`environment` uses only stdlib (`sys`, `platform`) — no extra dependency. Summary
+counts are always at the **trial level** — for `seed_scope='series'`, a series of
+`reps` reps contributes `reps` to each counter. Counts are mutually exclusive and
+exhaustive: every trial is either computed or retrieved. Failed trials (exception
+during fitting) record NaN in the metric file; this is visible there but not
+separately counted in the summary.
+
+The `experiment_spec` records the full parameter set, including cache keys, so it is
+possible to reconstruct which metric files belong to this run without traversing
+the directory tree. The run file itself is informational — it is not read during
+`run()` and plays no role in cache lookup.
 
 ---
 
 ## Scope
 
 This spec covers `EmpiricalDataExperiment` only. `Experiment` (synthetic problems)
-uses a single experiment-scoped RNG and is not modified here. The file structure and
-parameter names are designed to accommodate `Experiment` caching in a future spec
-without breaking changes.
+uses a single experiment-scoped RNG and is not modified here. The file structure is
+designed to accommodate `Experiment` caching in a future spec without breaking
+changes.
 
 ---
 
@@ -266,12 +331,14 @@ without breaking changes.
 - `results/` lives at the repository root (sibling of `experiments/`). Notebooks
   reference it as `'../results'` relative to `experiments/`, but use `CACHE_DIR`
   rather than hardcoding the path.
-- `metrics.npz` files are written atomically (write to a temp path, then
+- Metric JSON files are written atomically (write to a temp path, then
   `os.replace`) to avoid corrupted entries if a run is interrupted mid-write.
 - Cache keys change automatically when constructor parameters or their defaults
   change (via `joblib.hash()`). Changing an estimator implementation without
-  changing its parameters requires manual deletion or `overwrite=True`. Orphaned
-  directories with unrecognised keys are visible and harmless.
+  changing its parameters leaves stale cache entries that will silently be reused;
+  use `force_recompute=True` as a workaround until systematic cache invalidation
+  is addressed (see Future). Orphaned directories with unrecognised keys are
+  visible and harmless.
 - `results/` is tracked in git via a `results/.gitignore` file containing `*` and
   `!.gitignore` — the standard pattern that ignores all content while keeping the
   directory itself. Committing specific result files is possible with `git add -f`
@@ -281,9 +348,11 @@ without breaking changes.
 
 ## Files
 
-- Modify: `experiments/experiments.py` — add `generator`, `seed_scope`,
-  `seed_progression` to `EmpiricalDataExperiment.__init__`; update `run()`;
-  add `CACHE_DIR` module constant
+- Modify: `experiments/experiments.py`:
+  - Add `Metric` base class; update all existing stat classes to inherit from it
+  - Add `CACHE_DIR` module constant
+  - Add `force_recompute` and `ignore_cache` parameters to `run()`
+  - Implement caching loop in `run()`: key derivation, file read/write, warning calls
 - Create: `results/.gitignore` — containing `*` and `!.gitignore`
 
 ---
@@ -304,3 +373,29 @@ If independent control over estimator randomness is needed — for example to av
 over estimator randomness at a fixed data split — a nested `<est_seed>/` level
 inside `<trial_seed>/` is the natural extension. This leaves all outer path levels
 unchanged and is fully backwards compatible with existing results.
+
+### Extending to `Experiment` (synthetic problems)
+
+`Experiment` uses a single experiment-scoped RNG and produces a result array of
+shape `(len(problems), len(ns), len(estimators), reps, len(stats))`. Caching it
+whole is simpler than per-trial caching: the entire array maps to one key derived
+from the full experiment spec. Proposed file structure:
+
+```
+results/
+  experiment/
+    <experiment_key>/
+      <metric_name>.npy   <- full result array, shape (problems, ns, estimators, reps)
+```
+
+`.npy` (rather than JSON) is appropriate here since the arrays are large and
+numerical. The `computations`/`retrievals` history structure from the per-trial
+format does not apply — whole-experiment caching treats the run as atomic.
+
+### Cache invalidation
+
+When an estimator's implementation changes without its constructor parameters
+changing, existing cache entries for that estimator are stale but indistinguishable
+from valid ones by key alone. A future spec should address systematic invalidation —
+for example a `cache clear <estimator>` utility, or storing a source hash alongside
+the parameter hash in the cache key.
