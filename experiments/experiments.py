@@ -24,15 +24,6 @@ def _cache_key(obj):
     return f'{type(obj).__name__}__{joblib.hash(obj)}'
 
 
-def _series_dir(prob_key, n_train, est_key, reps, generator, seed):
-    return os.path.join(CACHE_DIR, 'series', prob_key, str(n_train),
-                        est_key, str(reps), generator, str(seed))
-
-
-def _trial_dir(prob_key, n_train, est_key, generator, trial_seed):
-    return os.path.join(CACHE_DIR, 'trial', prob_key, str(n_train),
-                        est_key, generator, str(trial_seed))
-
 
 def _load_metric_file(path):
     if not os.path.exists(path):
@@ -444,11 +435,13 @@ class EmpiricalDataExperiment:
         self.est_names = [str(e) for e in estimators] if est_names is None else est_names
         self.verbose = verbose
 
+    def _seed_val(self, unit_idx):
+        if self.seed is None:
+            return None
+        return self.seed if self.seed_progression == 'fixed' else self.seed + unit_idx
+
     def _make_rng(self, unit_idx):
-        seed_val = None if self.seed is None else (
-            self.seed if self.seed_progression == 'fixed' else self.seed + unit_idx
-        )
-        return self._rng_factory(seed_val)
+        return self._rng_factory(self._seed_val(unit_idx))
 
     def run(self):
         n_problems = len(self.problems)
