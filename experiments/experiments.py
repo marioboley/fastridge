@@ -403,6 +403,8 @@ class Experiment:
                             if not ignore_cache:
                                 self._write_trial(prob_idx, n_idx, est_idx, rep_idx)
                             trials_computed += 1
+                        if self.verbose:
+                            print('.', end='', flush=True)
             if self.verbose:
                 print()
         if not ignore_cache:
@@ -480,6 +482,9 @@ class ExperimentWithPerSeriesSeeding:
             msg = stat.warn_retrieval(data['computations'])
             if msg:
                 warnings.warn(msg)
+        if self.verbose:
+            for _ in range(self.reps):
+                print('.', end='', flush=True)
 
     def _run_series(self, prob_idx, n_idx, est_idx):
         problem = self.problems[prob_idx]
@@ -498,12 +503,14 @@ class ExperimentWithPerSeriesSeeding:
                               f" on '{problem.dataset}': {e}")
                 for stat in self.stats:
                     self._last_series_values[str(stat)].append(float('nan'))
-                continue
-            for stat in self.stats:
-                val = stat(_est, problem, X_test, y_test)
-                self.__dict__[str(stat) + '_'][rep_idx, prob_idx, n_idx, est_idx] = val
-                self._last_series_values[str(stat)].append(
-                    val.tolist() if hasattr(val, 'tolist') else float(val))
+            else:
+                for stat in self.stats:
+                    val = stat(_est, problem, X_test, y_test)
+                    self.__dict__[str(stat) + '_'][rep_idx, prob_idx, n_idx, est_idx] = val
+                    self._last_series_values[str(stat)].append(
+                        val.tolist() if hasattr(val, 'tolist') else float(val))
+            if self.verbose:
+                print('.', end='', flush=True)
 
     def _write_series(self, prob_idx, n_idx, est_idx):
         d = self._series_cache_dir(prob_idx, n_idx, est_idx)
