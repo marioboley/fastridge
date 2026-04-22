@@ -5,6 +5,7 @@ import pytest
 import experiments
 from fastridge import RidgeEM
 from problems import EmpiricalDataProblem, n_train_from_proportion
+from neurips2023 import SyntheticDataExperiment
 from experiments import (EmpiricalDataExperiment, Metric,
                          parameter_mean_squared_error, prediction_mean_squared_error,
                          regularization_parameter, number_of_iterations, variance_abs_error,
@@ -158,3 +159,11 @@ def test_pcg64_and_mt19937_differ():
     exp_mt = _simple_exp(generator='MT19937').run()
     exp_pc = _simple_exp(generator='PCG64').run()
     assert not np.array_equal(exp_mt.prediction_r2_, exp_pc.prediction_r2_)
+
+
+def test_synthetic_experiment_importable():
+    assert SyntheticDataExperiment is not None
+
+
+def test_experiment_not_in_experiments():
+    assert not hasattr(experiments, 'Experiment')
