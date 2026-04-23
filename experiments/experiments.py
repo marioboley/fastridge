@@ -332,10 +332,9 @@ class Experiment:
         self.verbose = verbose
 
     def _trial_cache_dir(self, prob_idx, n_idx, est_idx, rep_idx):
-        p = self.problems[prob_idx]
         return os.path.join(
             CACHE_DIR, 'trial',
-            _cache_key(p, slug=p.dataset),
+            _cache_key(self.problems[prob_idx]),
             str(int(self.ns[prob_idx][n_idx])),
             _cache_key(self.estimators[est_idx]),
             str(self.seed + rep_idx),
@@ -473,10 +472,9 @@ class ExperimentWithPerSeriesSeeding:
         self.verbose = verbose
 
     def _series_cache_dir(self, prob_idx, n_idx, est_idx):
-        p = self.problems[prob_idx]
         return os.path.join(
             CACHE_DIR, 'series',
-            _cache_key(p, slug=p.dataset),
+            _cache_key(self.problems[prob_idx]),
             str(int(self.ns[prob_idx][n_idx])),
             _cache_key(self.estimators[est_idx]),
             str(self.reps),

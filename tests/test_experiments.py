@@ -84,7 +84,7 @@ def test_warn_retrieval_returns_str_on_meaningful_variation():
                                                {'value': 0.80, 'run_id': 'y'}]), str)
 
 
-from experiments import (_cache_key, _load_metric_file, _save_metric_file,
+from experiments import (_load_metric_file, _save_metric_file,
                          _make_run_id, _write_run_file)
 
 
@@ -182,7 +182,8 @@ def test_new_experiment_result_shape():
 def test_new_experiment_trial_cache_hit(tmp_path, monkeypatch):
     monkeypatch.setattr(experiments, 'CACHE_DIR', str(tmp_path))
     exp1 = _simple_new_exp().run()
-    exp2 = _simple_new_exp().run()
+    with pytest.warns(UserWarning, match='FittingTime'):
+        exp2 = _simple_new_exp().run()
     np.testing.assert_array_equal(exp1.prediction_r2_, exp2.prediction_r2_)
 
 
@@ -195,7 +196,8 @@ def test_new_experiment_ignore_cache(tmp_path, monkeypatch):
 def test_new_experiment_force_recompute(tmp_path, monkeypatch):
     monkeypatch.setattr(experiments, 'CACHE_DIR', str(tmp_path))
     _simple_new_exp().run()
-    _simple_new_exp().run(force_recompute=True)
+    with pytest.warns(UserWarning, match='FittingTime'):
+        _simple_new_exp().run(force_recompute=True)
     trial_dir = os.path.join(str(tmp_path), 'trial')
     json_files = [os.path.join(r, f)
                   for r, _, fs in os.walk(trial_dir)
@@ -227,7 +229,8 @@ def test_series_exp_result_shape():
 def test_series_exp_cache_hit(tmp_path, monkeypatch):
     monkeypatch.setattr(experiments, 'CACHE_DIR', str(tmp_path))
     exp1 = _simple_series_exp().run()
-    exp2 = _simple_series_exp().run()
+    with pytest.warns(UserWarning, match='FittingTime'):
+        exp2 = _simple_series_exp().run()
     np.testing.assert_array_equal(exp1.prediction_r2_, exp2.prediction_r2_)
 
 
