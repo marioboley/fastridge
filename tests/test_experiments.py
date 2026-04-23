@@ -88,11 +88,6 @@ from experiments import (_cache_key, _load_metric_file, _save_metric_file,
                          _make_run_id, _write_run_file)
 
 
-def test_cache_key_format():
-    key = _cache_key(EmpiricalDataProblem('diabetes', 'target'))
-    assert key.startswith('EmpiricalDataProblem__')
-    assert len(key.split('__')[1]) > 0
-
 
 # tmp_path: pytest built-in fixture providing an isolated temporary directory
 # https://docs.pytest.org/en/stable/how-to/tmp_path.html
@@ -109,18 +104,21 @@ def test_save_load_metric_file_roundtrip(tmp_path):
 
 
 def test_make_run_id_format():
-    parts = _make_run_id().split('-')
+    run_id = _make_run_id('Experiment')
+    assert run_id.startswith('Experiment__')
+    tail = run_id[len('Experiment__'):]
+    parts = tail.split('-')
     assert len(parts) == 3
-    assert len(parts[0]) == 8
-    assert len(parts[1]) == 6
-    assert len(parts[2]) == 4
+    assert len(parts[0]) == 8   # YYYYMMDD
+    assert len(parts[1]) == 6   # HHMMSS
+    assert len(parts[2]) == 4   # random suffix
 
 
 # monkeypatch: pytest built-in fixture for temporarily patching module attributes
 # https://docs.pytest.org/en/stable/how-to/monkeypatch.html
 def test_write_run_file(tmp_path, monkeypatch):
     monkeypatch.setattr(experiments, 'CACHE_DIR', str(tmp_path))
-    run_id = _make_run_id()
+    run_id = _make_run_id('Experiment')
     _write_run_file(run_id, {'problems': []},
                     {'trials_computed': 0, 'trials_retrieved': 0})
     path = os.path.join(str(tmp_path), 'runs', f'{run_id}.json')

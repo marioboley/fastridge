@@ -20,8 +20,22 @@ from fastprogress.fastprogress import progress_bar
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'results')
 
 
-def _cache_key(obj):
-    return f'{type(obj).__name__}__{joblib.hash(obj)}'
+def _cache_key(obj, slug=''):
+    """Return a filesystem-safe cache key for obj.
+
+    The key is ``ClassName[_slug]__<joblib_hash>``. The optional slug is
+    included verbatim between the class name and the hash to make cache
+    directories human-browsable; callers are responsible for supplying a
+    meaningful, filesystem-safe value (e.g. a dataset name).
+
+    >>> _cache_key(object(), slug='')[:len('object__')]
+    'object__'
+    >>> key = _cache_key(object(), slug='iris')
+    >>> key.startswith('object_iris__')
+    True
+    """
+    sep = '_' if slug else ''
+    return f'{type(obj).__name__}{sep}{slug}__{joblib.hash(obj)}'
 
 
 
@@ -44,10 +58,16 @@ def _save_metric_file(path, data):
         warnings.warn(f'Cache write failed for {path}: {e}')
 
 
-def _make_run_id():
+def _make_run_id(class_name):
+    """Return a unique run identifier string of the form ``ClassName__YYYYMMDD-HHMMSS-xxxx``.
+
+    The timestamp component is the current local time; the four-character
+    suffix is a random alphanumeric string that disambiguates runs started
+    within the same second.
+    """
     ts = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
     suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
-    return f'{ts}-{suffix}'
+    return f'{class_name}__{ts}-{suffix}'
 
 
 def _write_run_file(run_id, exp_spec, summary):
@@ -312,9 +332,10 @@ class Experiment:
         self.verbose = verbose
 
     def _trial_cache_dir(self, prob_idx, n_idx, est_idx, rep_idx):
+        p = self.problems[prob_idx]
         return os.path.join(
             CACHE_DIR, 'trial',
-            _cache_key(self.problems[prob_idx]),
+            _cache_key(p, slug=p.dataset),
             str(int(self.ns[prob_idx][n_idx])),
             _cache_key(self.estimators[est_idx]),
             str(self.seed + rep_idx),
@@ -385,7 +406,7 @@ class Experiment:
         for stat in self.stats:
             self.__dict__[str(stat) + '_'] = np.full(
                 (self.reps, n_problems, n_sizes, n_estimators), np.nan)
-        self.run_id_ = _make_run_id()
+        self.run_id_ = _make_run_id(type(self).__name__)
         trials_computed = trials_retrieved = 0
         for prob_idx in range(n_problems):
             if self.verbose:
@@ -452,9 +473,10 @@ class ExperimentWithPerSeriesSeeding:
         self.verbose = verbose
 
     def _series_cache_dir(self, prob_idx, n_idx, est_idx):
+        p = self.problems[prob_idx]
         return os.path.join(
             CACHE_DIR, 'series',
-            _cache_key(self.problems[prob_idx]),
+            _cache_key(p, slug=p.dataset),
             str(int(self.ns[prob_idx][n_idx])),
             _cache_key(self.estimators[est_idx]),
             str(self.reps),
@@ -533,7 +555,7 @@ class ExperimentWithPerSeriesSeeding:
         for stat in self.stats:
             self.__dict__[str(stat) + '_'] = np.full(
                 (self.reps, n_problems, n_sizes, n_estimators), np.nan)
-        self.run_id_ = _make_run_id()
+        self.run_id_ = _make_run_id(type(self).__name__)
         trials_computed = trials_retrieved = 0
         for prob_idx in range(n_problems):
             if self.verbose:

@@ -74,6 +74,8 @@ Both classes follow the scikit-learn estimator API (`fit(X, y)` / `predict(X)`) 
 
 **Docstrings and comments:** Use only standard keyboard characters — no Unicode math or typographic symbols (e.g. avoid `×`, `∗`, `≤`, `²`). Use plain ASCII equivalents (`*`, `<=`, `**2`, etc.).
 
+**Function specs:** Every function must have a docstring that states its contract unambiguously reflecting a deliberate design rationale. If a function's behaviour cannot be stated clearly in one or two sentences, treat that as a signal the design needs rethinking. Doctests cover the primary use case where practical; pytest covers integration behaviour and cases that require fixtures (e.g. `tmp_path`).
+
 **Imports:** Default to top-level imports. Inline imports (`from x import y` inside a function) are acceptable only for optional external dependencies that may not be installed in all environments (e.g. `ucimlrepo` is not a package dependency). When using an inline import, add a module-level comment documenting the optional dependency so it is visible without reading function bodies. Raise the question with the user if a new case arises — the rule may evolve.
 
 ## Production Capacity
