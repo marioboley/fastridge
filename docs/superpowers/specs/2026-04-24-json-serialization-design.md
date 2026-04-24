@@ -49,13 +49,17 @@ excluded. Callers specify exactly what they need.
 | `isinstance(obj, np.integer)` | `int(obj)` |
 | `isinstance(obj, np.floating)` | `float(obj)` |
 | `isinstance(obj, np.ndarray)` | `obj.tolist()` |
-| `isinstance(obj, (list, tuple))` | `[to_json(item) for item in obj]` |
+| `isinstance(obj, list)` | `[to_json(item) for item in obj]` |
+| `isinstance(obj, tuple)` | `{"__tuple__": [to_json(item) for item in obj]}` — escape hatch for explicit tuples in non-frozen contexts |
 | `dataclasses.is_dataclass(obj) and not isinstance(obj, type)` | see Dataclass below |
 | `hasattr(obj, 'get_params')` | see Get-params below |
 | `callable(obj)` | see Callable below |
 | otherwise | `TypeError` |
 
 **Dataclass objects** (problems, transform wrappers like `PolynomialExpansion`):
+
+Non-frozen dataclasses emit `__class__`; values are recursively serialized via the normal
+dispatch (tuples → `{"__tuple__": ...}`):
 ```json
 {
   "__class__": "problems.EmpiricalDataProblem",
@@ -64,8 +68,24 @@ excluded. Callers specify exactly what they need.
   "x_transforms": [{"__class__": "problems.PolynomialExpansion", "degree": 2}]
 }
 ```
-`__class__` is `f"{type(obj).__module__}.{type(obj).__qualname__}"`.
-Fields come from `dataclasses.fields(obj)`; values are recursively serialized.
+
+Frozen dataclasses emit `__frozenclass__` instead of `__class__`. Frozen dataclasses
+conventionally use tuples for sequence fields (mutability would be inconsistent with
+immutability). To honour this convention and keep the output readable, tuple field values
+are emitted as plain JSON arrays — bypassing the `{"__tuple__": ...}` dispatch — and
+`from_json` coerces them back on reconstruction:
+```json
+{
+  "__frozenclass__": "problems.EmpiricalDataProblem",
+  "dataset": "diabetes",
+  "target": "target",
+  "x_transforms": [{"__class__": "problems.PolynomialExpansion", "degree": 2}]
+}
+```
+The `__frozenclass__` key is `f"{type(obj).__module__}.{type(obj).__qualname__}"`.
+Emission is triggered by `obj.__dataclass_params__.frozen`.
+
+Fields come from `dataclasses.fields(obj)`.
 `include_computed` has no effect on dataclasses (they carry no `_`-suffix convention).
 
 **Get-params objects** (estimators, experiments via `Computation`):
@@ -112,18 +132,27 @@ Inverse of `to_json`. Dispatch on the shape of `data`:
 |-------|----------------|
 | `None`, `bool`, `int`, `float`, `str` | `data` (as-is) |
 | `list` | `[from_json(item) for item in data]` |
+| `dict` with `"__tuple__"` | `tuple(from_json(item) for item in data["__tuple__"])` |
 | `dict` with `"__callable__"` | `importlib` import + `getattr` |
+| `dict` with `"__frozenclass__"` | `importlib` import + `ClassName(**spec_kwargs)` with list kwargs coerced to tuples |
 | `dict` with `"__class__"` | `importlib` import + `ClassName(**spec_kwargs)`, then `setattr` for `_`-suffix keys |
 | plain `dict` | `{k: from_json(v) for k, v in data.items()}` |
 
 Callable reconstruction: `"numpy.log"` →
 `getattr(importlib.import_module("numpy"), "log")`.
 
-Class reconstruction: the module and class name are split from `__class__`. The class is
-imported via `importlib`. Keys not ending in `_` (excluding `__class__`) are passed to
-`__init__`; keys ending in `_` are applied via `setattr` after construction. Both
-dataclasses and get-params classes reconstruct via `__init__` — no `set_params()` is
-needed.
+Class reconstruction: the module and class name are split from `__class__` (or
+`__frozenclass__`). The class is imported via `importlib`. Keys not ending in `_`
+(excluding the marker key) are passed to `__init__`; keys ending in `_` are applied via
+`setattr` after construction. Both dataclasses and get-params classes reconstruct via
+`__init__` — no `set_params()` is needed.
+
+Frozen dataclass reconstruction (`__frozenclass__`): constructor kwargs that are plain
+lists are coerced to tuples before the `__init__` call. No `setattr` pass is needed —
+frozen dataclasses carry no `_`-suffix computed state. This coercion relies on the
+convention that frozen dataclass fields use tuples, not lists, for sequences; a field that
+genuinely holds a list cannot appear inside a `__frozenclass__` object (use a non-frozen
+dataclass in that case).
 
 Init-time normalization is idempotent: `np.atleast_2d` on an already-2D array is a no-op;
 resolved defaults (e.g. `est_names` derived from estimators) round-trip correctly because
