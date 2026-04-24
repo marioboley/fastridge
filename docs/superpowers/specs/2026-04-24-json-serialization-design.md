@@ -12,9 +12,9 @@ minimal footprint in the content modules (`problems.py`, `experiments.py`, `fast
 ## Scope
 
 In scope:
-- Unfitted spec serialization for problems, estimators, and experiments
+- Spec and computed-state serialization for problems, estimators, and experiments
 - Callable (function) serialization for problem transform fields
-- `BaseExperiment` mixin giving experiments a `get_params()` implementation
+- `Computation` base class giving experiments `get_params()` via `__init__` inspection
 - New `util.py` module housing the protocol and shared I/O helpers
 
 Out of scope (planned, not implemented):
@@ -26,13 +26,18 @@ Out of scope (planned, not implemented):
 
 ## Protocol
 
-### `to_json(obj)`
+### `to_json(obj, include_computed=False)`
 
-Recursive single-dispatch function in `util.py`. Dispatch order:
+Recursive function in `util.py`. Serializes the spec of any supported object. When
+`include_computed=True`, also captures `_`-suffix attributes (computed state) into a
+`"__computed__"` key. This is the sole mechanism for state serialization — callers such as
+`_write_run_file` do not assemble state manually.
+
+**Dispatch order** (applied to `obj` for the spec portion):
 
 | Condition | Output |
 |-----------|--------|
-| `obj` is `None`, `bool`, `int`, `float`, `str` | `obj` (as-is) |
+| `None`, `bool`, `int`, `float`, `str` | `obj` (as-is) |
 | `isinstance(obj, np.integer)` | `int(obj)` |
 | `isinstance(obj, np.floating)` | `float(obj)` |
 | `isinstance(obj, np.ndarray)` | `obj.tolist()` |
@@ -53,17 +58,25 @@ Recursive single-dispatch function in `util.py`. Dispatch order:
 ```
 `__class__` is `f"{type(obj).__module__}.{type(obj).__qualname__}"`.
 Fields come from `dataclasses.fields(obj)`; values are recursively serialized.
+`include_computed` has no effect on dataclasses (they have no `_`-suffix convention).
 
-**Get-params objects** (estimators, experiments via `BaseExperiment`):
+**Get-params objects** (estimators, experiments via `Computation`):
 ```json
 {
   "__class__": "fastridge.RidgeEM",
   "fit_intercept": true,
   "normalize": true,
-  "epsilon": 1e-06
+  "epsilon": 1e-06,
+  "__computed__": {
+    "coef_": [0.1, 0.2],
+    "alpha_": 1.5
+  }
 }
 ```
 Params come from `obj.get_params(deep=False)`; values are recursively serialized.
+When `include_computed=True`, `__computed__` is populated from
+`{k: to_json(v) for k, v in obj.__dict__.items() if k.endswith('_')}`.
+The `__computed__` key is omitted entirely when `include_computed=False`.
 
 **Callable objects** (numpy ufuncs and other importable named functions):
 ```json
@@ -82,14 +95,17 @@ Inverse of `to_json`. Dispatch on the shape of `data`:
 | `None`, `bool`, `int`, `float`, `str` | `data` (as-is) |
 | `list` | `[from_json(item) for item in data]` |
 | `dict` with `"__callable__"` | `importlib` import + `getattr` |
-| `dict` with `"__class__"` | `importlib` import + `ClassName(**{k: from_json(v) ...})` |
+| `dict` with `"__class__"` | `importlib` import + `ClassName(**spec_kwargs)`, then `setattr` for `__computed__` |
 | plain `dict` | `{k: from_json(v) for k, v in data.items()}` |
 
-Callable reconstruction example: `"numpy.log"` → `getattr(importlib.import_module("numpy"), "log")`.
+Callable reconstruction: `"numpy.log"` →
+`getattr(importlib.import_module("numpy"), "log")`.
 
-Class reconstruction: the module and class name are split from `__class__`. The class is imported
-via `importlib` and instantiated with the remaining keys as keyword arguments. Both dataclasses and
-get-params classes reconstruct via `__init__` — no `set_params()` is needed.
+Class reconstruction: the module and class name are split from `__class__`. The class is
+imported via `importlib` and instantiated with the remaining non-dunder keys as keyword
+arguments. If `"__computed__"` is present, each key-value pair is applied via `setattr`
+after construction. Both dataclasses and get-params classes reconstruct via `__init__` —
+no `set_params()` is needed.
 
 Init-time normalization is idempotent: `np.atleast_2d` on an already-2D array is a no-op;
 resolved defaults (e.g. `est_names` derived from estimators) round-trip correctly because
@@ -118,15 +134,15 @@ branch, so the callable path is not involved.
 
 ---
 
-## `BaseExperiment`
+## `Computation` Base Class
 
-A thin mixin in `util.py` implementing `get_params()` via `__init__` signature inspection,
-mirroring sklearn's `BaseEstimator` without inheriting from it:
+A thin base class in `util.py` implementing `get_params()` via `__init__` signature
+inspection, mirroring sklearn's `BaseEstimator` without inheriting from it:
 
 ```python
 import inspect
 
-class BaseExperiment:
+class Computation:
     def get_params(self, deep=False):
         sig = inspect.signature(type(self).__init__)
         return {
@@ -136,62 +152,70 @@ class BaseExperiment:
         }
 ```
 
-Both `Experiment` and `ExperimentWithPerSeriesSeeding` inherit from `BaseExperiment`.
-No other change is required in `experiments.py` — `to_json` dispatches on `get_params`
-and the convention `self.param = param` (already followed) is all that is needed.
+Both `Experiment` and `ExperimentWithPerSeriesSeeding` inherit from `Computation`.
+No other change is required in `experiments.py` — `to_json` dispatches on `hasattr(obj,
+'get_params')`, which covers both `Computation` subclasses and sklearn estimators (which
+bring `get_params` from `BaseEstimator`).
 
 The `deep=False` parameter is accepted for API compatibility but ignored: experiment params
-are not themselves estimators, so deep cloning is not applicable here.
+are not themselves estimators, so deep param traversal is not applicable here.
 
 ---
 
-## Spec vs State
+## Computed State and the Run File
 
-Experiments and estimators both follow the sklearn convention that fitted attributes carry
-a trailing underscore (e.g. `run_id_`, `prediction_r2_`, `coef_`). `to_json` serializes
-the **spec** only (via `get_params` or dataclass fields). Callers that need to include state
-(such as `_write_run_file`) gather `_`-suffix attributes separately from `obj.__dict__` and
-assemble the final document themselves. This keeps `to_json` single-purpose.
+The `_`-suffix convention (shared with sklearn) distinguishes spec attributes (set in
+`__init__`) from computed attributes (set during `run()` or `fit()`). `to_json` with
+`include_computed=True` handles both in one call.
 
-Example run file structure (assembled by `_write_run_file`):
-```json
-{
-  "run_id": "Experiment__20260424-103000-ab12",
-  "class": "Experiment",
-  "status": "in_progress",
-  "timestamp_start": "2026-04-24T10:30:00",
-  "timestamp_end": null,
-  "environment": {"python": "3.11.0", "platform": "..."},
-  "spec": { ... },
-  "summary": null
-}
+For experiments, `run()` sets the following `_`-suffix attributes before the first run-file
+write, so they appear in both writes:
+
+- `run_id_` — unique identifier for this run
+- `timestamp_start_` — ISO timestamp captured at the start of `run()`
+- `environment_` — `{'python': sys.version.split()[0], 'platform': platform.platform()}`
+
+After the run completes, additional attributes are set before the second write:
+
+- `timestamp_end_` — ISO timestamp captured on completion
+- `<stat_name>_` for each stat (e.g. `prediction_r2_`) — result arrays
+
+`_write_run_file` becomes a thin wrapper:
+
+```python
+def _write_run_file(exp):
+    path = os.path.join(CACHE_DIR, 'runs', f'{exp.run_id_}.json')
+    _save_json(path, to_json(exp, include_computed=True))
 ```
-`spec` is the output of `to_json(experiment)`. `summary` is populated on the second write.
+
+The run file `status` field is derived from `timestamp_end_`: `None` → `'in_progress'`,
+set → `'completed'`. This derivation happens inside `to_json` or `_write_run_file` rather
+than being stored as a redundant attribute.
 
 ---
 
 ## Forward Plan: Fitted Estimator Serialization
 
-Not in scope now, but the design accommodates it cleanly. Two paths:
+Not in scope now, but the design accommodates it. Two paths, selectable per experiment:
 
-**JSON path**: extend a `to_json_fitted(est)` call that returns the spec dict plus a `"state"`
-key containing `_`-suffix attributes serialized via `to_json`. Works for `RidgeEM` and
-`RidgeLOOCV` whose fitted state is small (numpy arrays of length `p`).
+**JSON path**: `to_json(est, include_computed=True)` already serializes `_`-suffix
+attributes. For `RidgeEM` and `RidgeLOOCV` whose fitted state is small (numpy arrays of
+length `p`), this produces a fully human-readable, version-stable cache.
 
-**Pickle path**: `save_estimator(est, path)` / `load_estimator(path)` using `pickle`. Suitable
-for third-party estimators with complex fitted state (pipelines, forests, sparse matrices).
+**Pickle path**: `save_estimator(est, path)` / `load_estimator(path)` using `pickle`.
+Suitable for third-party estimators with complex fitted state (pipelines, forests, sparse
+matrices).
 
-The experiment class will expose an `estimator_cache: str` parameter (`'json'` or `'pickle'`,
-defaulting to `'pickle'` for safety) to select the path per run. Both paths coexist; the
-JSON path is preferred when the fitted state is known to be small and human-readable.
+The experiment class will expose an `estimator_cache: str` parameter (`'json'` or
+`'pickle'`, defaulting to `'pickle'` for safety) to select the path per run.
 
 ---
 
 ## Module Structure
 
 New file `experiments/util.py`:
-- `BaseExperiment` — `get_params()` via `__init__` inspection
-- `to_json(obj)` — recursive serialization
+- `Computation` — `get_params()` via `__init__` inspection
+- `to_json(obj, include_computed=False)` — recursive serialization
 - `from_json(data)` — recursive reconstruction
 - `_save_json(path, data)` — atomic JSON write (moved from `experiments.py`)
 - `_load_metric_file(path)` — metric file load with default (moved from `experiments.py`)
