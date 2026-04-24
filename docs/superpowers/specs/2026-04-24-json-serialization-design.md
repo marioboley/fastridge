@@ -195,17 +195,41 @@ Before the second write (after completion):
 
 - `timestamp_end_` — ISO timestamp captured on completion
 
+Two further computed attributes are set at the start of `run()` and serve as forward links
+from the run file to the cache directories:
+
+- `problem_keys_` — `[_cache_key(p) for p in self.problems]`
+- `estimator_keys_` — `[_cache_key(e) for e in self.estimators]`
+
+The spec already records the full params of each problem and estimator for human
+readability; the keys add machine-browsable links to the cache directory tree.
+
 Result arrays (`prediction_r2_` etc.) are also `_`-suffix attrs but are deliberately
 excluded from run files — they replicate cache content already stored in the metric JSON
 files. `_write_run_file` uses the list form of `include_computed` to be explicit:
 
 ```python
-_RUN_FILE_STATE = ['run_id_', 'timestamp_start_', 'timestamp_end_', 'environment_']
+_RUN_FILE_STATE = [
+    'run_id_', 'timestamp_start_', 'timestamp_end_', 'environment_',
+    'problem_keys_', 'estimator_keys_',
+]
 
 def _write_run_file(exp):
     path = os.path.join(CACHE_DIR, 'runs', f'{exp.run_id_}.json')
     _save_json(path, to_json(exp, include_computed=_RUN_FILE_STATE))
 ```
+
+**Recursive safety**: `include_computed` does not propagate into nested `to_json` calls.
+Spec values (estimators, problems) are always serialized with `include_computed=False`,
+so fitted state on member estimators can never appear in the run file accidentally.
+Experiments only fit cloned copies of member estimators anyway, so the members themselves
+carry no fitted state; the whitelist form of `include_computed` is a further layer of
+defence. The whitelist may later evolve to an exclusion list if the set of excluded
+attributes becomes easier to name than the included ones.
+
+A future `include_computed='deep'` mode (or similar) could propagate the flag recursively
+into nested get-params objects, enabling full serialization of fitted experiment members.
+This is not needed at present.
 
 
 ---
