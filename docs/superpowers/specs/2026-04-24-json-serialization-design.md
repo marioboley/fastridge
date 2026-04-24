@@ -207,9 +207,6 @@ def _write_run_file(exp):
     _save_json(path, to_json(exp, include_computed=_RUN_FILE_STATE))
 ```
 
-The `status` field (`'in_progress'` / `'completed'`) is derived from `timestamp_end_`
-inside `_write_run_file` and added to the document before saving — it is not a stored
-attribute.
 
 ---
 
