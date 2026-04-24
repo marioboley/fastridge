@@ -28,10 +28,18 @@ Out of scope (planned, not implemented):
 
 ### `to_json(obj, include_computed=False)`
 
-Recursive function in `util.py`. Serializes the spec of any supported object. When
-`include_computed=True`, also captures `_`-suffix attributes (computed state) into a
-`"__computed__"` key. This is the sole mechanism for state serialization — callers such as
-`_write_run_file` do not assemble state manually.
+Recursive function in `util.py`. Serializes the spec of any supported object. The
+`include_computed` parameter controls which computed (`_`-suffix) attributes are included
+alongside the spec in a flat output:
+
+- `False` (default): spec only
+- `True`: all `_`-suffix attributes from `obj.__dict__`
+- `list[str]`: only the named attributes (e.g. `['run_id_', 'timestamp_start_']`)
+
+The list form exists because not all computed attributes belong in every context: result
+arrays (`prediction_r2_` etc.) replicate cache content and should be excluded from run
+files; future fitted estimator attributes stored as separate files similarly should be
+excluded. Callers specify exactly what they need.
 
 **Dispatch order** (applied to `obj` for the spec portion):
 
@@ -58,25 +66,35 @@ Recursive function in `util.py`. Serializes the spec of any supported object. Wh
 ```
 `__class__` is `f"{type(obj).__module__}.{type(obj).__qualname__}"`.
 Fields come from `dataclasses.fields(obj)`; values are recursively serialized.
-`include_computed` has no effect on dataclasses (they have no `_`-suffix convention).
+`include_computed` has no effect on dataclasses (they carry no `_`-suffix convention).
 
 **Get-params objects** (estimators, experiments via `Computation`):
+
+Spec-only output (`include_computed=False`):
+```json
+{
+  "__class__": "fastridge.RidgeEM",
+  "fit_intercept": true,
+  "normalize": true,
+  "epsilon": 1e-06
+}
+```
+
+With `include_computed=['coef_', 'alpha_']`, computed attrs are merged flat:
 ```json
 {
   "__class__": "fastridge.RidgeEM",
   "fit_intercept": true,
   "normalize": true,
   "epsilon": 1e-06,
-  "__computed__": {
-    "coef_": [0.1, 0.2],
-    "alpha_": 1.5
-  }
+  "coef_": [0.1, 0.2],
+  "alpha_": 1.5
 }
 ```
+
 Params come from `obj.get_params(deep=False)`; values are recursively serialized.
-When `include_computed=True`, `__computed__` is populated from
-`{k: to_json(v) for k, v in obj.__dict__.items() if k.endswith('_')}`.
-The `__computed__` key is omitted entirely when `include_computed=False`.
+Computed attrs are merged at the top level — the trailing `_` is the discriminator between
+spec keys and computed keys, making a separate nesting level unnecessary.
 
 **Callable objects** (numpy ufuncs and other importable named functions):
 ```json
@@ -95,17 +113,17 @@ Inverse of `to_json`. Dispatch on the shape of `data`:
 | `None`, `bool`, `int`, `float`, `str` | `data` (as-is) |
 | `list` | `[from_json(item) for item in data]` |
 | `dict` with `"__callable__"` | `importlib` import + `getattr` |
-| `dict` with `"__class__"` | `importlib` import + `ClassName(**spec_kwargs)`, then `setattr` for `__computed__` |
+| `dict` with `"__class__"` | `importlib` import + `ClassName(**spec_kwargs)`, then `setattr` for `_`-suffix keys |
 | plain `dict` | `{k: from_json(v) for k, v in data.items()}` |
 
 Callable reconstruction: `"numpy.log"` →
 `getattr(importlib.import_module("numpy"), "log")`.
 
 Class reconstruction: the module and class name are split from `__class__`. The class is
-imported via `importlib` and instantiated with the remaining non-dunder keys as keyword
-arguments. If `"__computed__"` is present, each key-value pair is applied via `setattr`
-after construction. Both dataclasses and get-params classes reconstruct via `__init__` —
-no `set_params()` is needed.
+imported via `importlib`. Keys not ending in `_` (excluding `__class__`) are passed to
+`__init__`; keys ending in `_` are applied via `setattr` after construction. Both
+dataclasses and get-params classes reconstruct via `__init__` — no `set_params()` is
+needed.
 
 Init-time normalization is idempotent: `np.atleast_2d` on an already-2D array is a no-op;
 resolved defaults (e.g. `est_names` derived from estimators) round-trip correctly because
@@ -165,32 +183,33 @@ are not themselves estimators, so deep param traversal is not applicable here.
 ## Computed State and the Run File
 
 The `_`-suffix convention (shared with sklearn) distinguishes spec attributes (set in
-`__init__`) from computed attributes (set during `run()` or `fit()`). `to_json` with
-`include_computed=True` handles both in one call.
+`__init__`) from computed attributes (set during `run()` or `fit()`).
 
-For experiments, `run()` sets the following `_`-suffix attributes before the first run-file
-write, so they appear in both writes:
+For experiments, `run()` sets these `_`-suffix attributes before the first run-file write:
 
 - `run_id_` — unique identifier for this run
 - `timestamp_start_` — ISO timestamp captured at the start of `run()`
 - `environment_` — `{'python': sys.version.split()[0], 'platform': platform.platform()}`
 
-After the run completes, additional attributes are set before the second write:
+Before the second write (after completion):
 
 - `timestamp_end_` — ISO timestamp captured on completion
-- `<stat_name>_` for each stat (e.g. `prediction_r2_`) — result arrays
 
-`_write_run_file` becomes a thin wrapper:
+Result arrays (`prediction_r2_` etc.) are also `_`-suffix attrs but are deliberately
+excluded from run files — they replicate cache content already stored in the metric JSON
+files. `_write_run_file` uses the list form of `include_computed` to be explicit:
 
 ```python
+_RUN_FILE_STATE = ['run_id_', 'timestamp_start_', 'timestamp_end_', 'environment_']
+
 def _write_run_file(exp):
     path = os.path.join(CACHE_DIR, 'runs', f'{exp.run_id_}.json')
-    _save_json(path, to_json(exp, include_computed=True))
+    _save_json(path, to_json(exp, include_computed=_RUN_FILE_STATE))
 ```
 
-The run file `status` field is derived from `timestamp_end_`: `None` → `'in_progress'`,
-set → `'completed'`. This derivation happens inside `to_json` or `_write_run_file` rather
-than being stored as a redundant attribute.
+The `status` field (`'in_progress'` / `'completed'`) is derived from `timestamp_end_`
+inside `_write_run_file` and added to the document before saving — it is not a stored
+attribute.
 
 ---
 
@@ -198,9 +217,9 @@ than being stored as a redundant attribute.
 
 Not in scope now, but the design accommodates it. Two paths, selectable per experiment:
 
-**JSON path**: `to_json(est, include_computed=True)` already serializes `_`-suffix
-attributes. For `RidgeEM` and `RidgeLOOCV` whose fitted state is small (numpy arrays of
-length `p`), this produces a fully human-readable, version-stable cache.
+**JSON path**: `to_json(est, include_computed=True)` serializes all `_`-suffix attributes
+flat alongside the spec. For `RidgeEM` and `RidgeLOOCV` whose fitted state is small (numpy
+arrays of length `p`), this produces a fully human-readable, version-stable cache.
 
 **Pickle path**: `save_estimator(est, path)` / `load_estimator(path)` using `pickle`.
 Suitable for third-party estimators with complex fitted state (pipelines, forests, sparse
