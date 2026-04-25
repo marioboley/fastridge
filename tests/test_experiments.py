@@ -84,7 +84,7 @@ def test_warn_retrieval_returns_str_on_meaningful_variation():
                                                {'value': 0.80, 'run_id': 'y'}]), str)
 
 
-from experiments import (_load_metric_file, _save_metric_file,
+from experiments import (_load_metric_file, _save_json,
                          _make_run_id, _write_run_file)
 
 
@@ -99,7 +99,7 @@ def test_load_metric_file_missing(tmp_path):
 def test_save_load_metric_file_roundtrip(tmp_path):
     path = str(tmp_path / 'sub' / 'm.json')
     original = {'computations': [{'value': 0.85, 'run_id': 'abc'}], 'retrievals': []}
-    _save_metric_file(path, original)
+    _save_json(path, original)
     assert _load_metric_file(path) == original
 
 

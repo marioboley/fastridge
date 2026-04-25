@@ -46,7 +46,8 @@ def _load_metric_file(path):
         return json.load(f)
 
 
-def _save_metric_file(path, data):
+def _save_json(path, data):
+    """Write data as JSON to path atomically via tempfile + os.replace, creating parent dirs."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path))
     try:
@@ -82,7 +83,7 @@ def _write_run_file(run_id, exp_spec, summary):
         'summary': summary,
     }
     path = os.path.join(CACHE_DIR, 'runs', f'{run_id}.json')
-    _save_metric_file(path, data)
+    _save_json(path, data)
 
 
 class Metric:
@@ -355,7 +356,7 @@ class Experiment:
             mean_val = float(np.mean([c['value'] for c in data['computations']]))
             self.__dict__[str(stat) + '_'][rep_idx, prob_idx, n_idx, est_idx] = mean_val
             data['retrievals'].append({'value': mean_val, 'run_id': self.run_id_})
-            _save_metric_file(path, data)
+            _save_json(path, data)
             msg = stat.warn_retrieval(data['computations'])
             if msg:
                 warnings.warn(msg)
@@ -373,30 +374,24 @@ class Experiment:
         except Exception as e:
             warnings.warn(f"rep {rep_idx} failed for '{self.est_names[est_idx]}'"
                           f" on '{problem.dataset}': {e}")
-            self._last_trial_values = None
             return
-        self._last_trial_values = {}
         for stat in self.stats:
             val = stat(_est, problem, X_test, y_test)
             self.__dict__[str(stat) + '_'][rep_idx, prob_idx, n_idx, est_idx] = val
-            self._last_trial_values[str(stat)] = (
-                val.tolist() if hasattr(val, 'tolist') else float(val))
 
     def _write_trial(self, prob_idx, n_idx, est_idx, rep_idx):
-        if self._last_trial_values is None:
-            return
         d = self._trial_cache_dir(prob_idx, n_idx, est_idx, rep_idx)
         for stat in self.stats:
             path = os.path.join(d, str(stat) + '.json')
             data = _load_metric_file(path)
-            new_val = self._last_trial_values[str(stat)]
+            new_val = self.__dict__[str(stat) + '_'][rep_idx, prob_idx, n_idx, est_idx]
             if data['computations']:
                 msg = stat.warn_recompute(
                     [c['value'] for c in data['computations']], new_val)
                 if msg:
                     warnings.warn(msg)
             data['computations'].append({'value': new_val, 'run_id': self.run_id_})
-            _save_metric_file(path, data)
+            _save_json(path, data)
 
     def run(self, force_recompute=False, ignore_cache=False):
         n_problems = len(self.problems)
@@ -498,7 +493,7 @@ class ExperimentWithPerSeriesSeeding:
             self.__dict__[str(stat) + '_'][:, prob_idx, n_idx, est_idx] = mean_val
             serialisable = mean_val.tolist() if hasattr(mean_val, 'tolist') else float(mean_val)
             data['retrievals'].append({'value': serialisable, 'run_id': self.run_id_})
-            _save_metric_file(path, data)
+            _save_json(path, data)
             msg = stat.warn_retrieval(data['computations'])
             if msg:
                 warnings.warn(msg)
@@ -510,7 +505,6 @@ class ExperimentWithPerSeriesSeeding:
         problem = self.problems[prob_idx]
         n_train = int(self.ns[prob_idx][n_idx])
         rng = np.random.RandomState(self.seed)
-        self._last_series_values = {str(stat): [] for stat in self.stats}
         for rep_idx in range(self.reps):
             X_train, X_test, y_train, y_test = problem.get_X_y(n_train, rng=rng)
             _est = clone(self.estimators[est_idx], safe=False)
@@ -521,14 +515,10 @@ class ExperimentWithPerSeriesSeeding:
             except Exception as e:
                 warnings.warn(f"rep {rep_idx} failed for '{self.est_names[est_idx]}'"
                               f" on '{problem.dataset}': {e}")
-                for stat in self.stats:
-                    self._last_series_values[str(stat)].append(float('nan'))
             else:
                 for stat in self.stats:
                     val = stat(_est, problem, X_test, y_test)
                     self.__dict__[str(stat) + '_'][rep_idx, prob_idx, n_idx, est_idx] = val
-                    self._last_series_values[str(stat)].append(
-                        val.tolist() if hasattr(val, 'tolist') else float(val))
             if self.verbose:
                 print('.', end='', flush=True)
 
@@ -537,14 +527,14 @@ class ExperimentWithPerSeriesSeeding:
         for stat in self.stats:
             path = os.path.join(d, str(stat) + '.json')
             data = _load_metric_file(path)
-            new_values = self._last_series_values[str(stat)]
+            new_values = self.__dict__[str(stat) + '_'][:, prob_idx, n_idx, est_idx]
             if data['computations']:
-                existing = [np.asarray(c['value']) for c in data['computations']]
-                msg = stat.warn_recompute(existing, np.asarray(new_values))
+                msg = stat.warn_recompute(
+                    [c['value'] for c in data['computations']], new_values)
                 if msg:
                     warnings.warn(msg)
-            data['computations'].append({'value': new_values, 'run_id': self.run_id_})
-            _save_metric_file(path, data)
+            data['computations'].append({'value': new_values.tolist(), 'run_id': self.run_id_})
+            _save_json(path, data)
 
     def run(self, force_recompute=False, ignore_cache=False):
         n_problems = len(self.problems)
