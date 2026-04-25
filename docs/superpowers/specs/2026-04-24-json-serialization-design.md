@@ -36,7 +36,8 @@ framework.
 
 To required object types are covered via the following abstract types:
 
-1. **Numpy `ArrayLike`** containing all primitive Python types as well as lists and tuples.
+1. **Basic Types** — Python primitives (`None`, `bool`, `int`, `float`, `str`), dicts, lists,
+tuples, and their numpy scalar and array equivalents.
 2. **Named imports** that can be reconstructed via a named import from a Python module in
 scope of the module loader. This covers `numpy.ufunc` that appear as transforms.
 3. **Transparent Classes** where the parameters of the init method correspond to attributes
@@ -72,11 +73,13 @@ serialised spec-only regardless of the top-level setting.
 | `isinstance(obj, np.ndarray)` | `obj.tolist()` |
 | `isinstance(obj, list)` | `[to_json(item) for item in obj]` |
 | `isinstance(obj, tuple)` | `{"__tuple__": [to_json(item) for item in obj]}` |
+| `isinstance(obj, dict)` | `{k: to_json(v) for k, v in obj.items()}` |
 | `_is_named_import(obj)` | `{"__import__": f"{obj.__module__}.{obj.__qualname__}"}` |
 | default (Transparent Class) | `{"__class__": cls_ref, **{k: to_json(v) for k, v in _init_params(obj).items()}, **{k: to_json(getattr(obj, k)) for k in _computed_keys(obj, include_computed)}}` |
 
-If the default case cannot enumerate init params or a param is not stored as a same-named
-attribute, `to_json` raises `TypeError`.
+If a parameter from the signature is not accessible as a same-named attribute, `to_json`
+emits a `UserWarning` and omits that parameter. The resulting JSON will fail on
+reconstruction, which is the intended failure point.
 
 Throughout:
 - `cls_ref = f"{type(obj).__module__}.{type(obj).__qualname__}"`
@@ -86,66 +89,65 @@ Throughout:
 
 ### Deserialisation: `from_json(data)`
 
+`from_json` operates on the Python object returned by `json.loads()`. Its input is therefore
+always one of `None`, `bool`, `int`, `float`, `str`, `list`, or `dict` — the types produced
+by the stdlib JSON decoder. Numpy types never appear as input.
+
 | Input | Reconstruction |
 |-------|----------------|
-| `None`, `bool`, `int`, `float`, `str` | `data` |
+| `None`, `bool`, `int`, `float`, `str` | `data` (as returned by `json.loads`) |
 | `list` | `[from_json(item) for item in data]` |
 | `dict` with `"__tuple__"` | `tuple(from_json(item) for item in data["__tuple__"])` |
 | `dict` with `"__import__"` | `getattr(importlib.import_module(module), name)` where `module, _, name = data["__import__"].rpartition(".")` |
 | `dict` with `"__class__"` | `cls(**{k: from_json(v) for k in data if k != '__class__' and not k.endswith('_')})` then `setattr(obj, k, from_json(data[k]))` for `_`-suffix keys |
 | plain `dict` | `{k: from_json(v) for k, v in data.items()}` |
 
-For `__class__`: `module, _, name = data["__class__"].rpartition(".")`, `cls = getattr(importlib.import_module(module), name)`. Init-time normalisation is idempotent because `to_json` stores the already-stored attribute value, not the original constructor argument.
+For `__class__`: `module, _, name = data["__class__"].rpartition(".")`, `cls = getattr(importlib.import_module(module), name)`. Init-time normalisation is idempotent because `to_json` stores the already-stored attribute value. Reconstruction to numpy types (e.g. `np.ndarray` from a nested list) is the constructor's responsibility, not the framework's.
 
 ---
 
-## Behaviour for Relevant Types
+## Behaviour for Members of Experiment Runners
 
-### Scalars and Numpy Scalars
+Each subsection shows the full roundtrip: Python input to `to_json`, the JSON text written
+to disk, and the Python value returned by `from_json(json.loads(...))`.
 
-Python primitives pass through as-is. `np.integer` and `np.floating` are coerced to Python
-`int` and `float` respectively before writing.
+### Scalars, Numpy Scalars, and Numpy Arrays
 
-```json
-42
-3.14
-"diabetes"
-true
-null
-```
+| Python in | JSON | Python out |
+|-----------|------|------------|
+| `42` | `42` | `42` (`int`) |
+| `3.14` | `3.14` | `3.14` (`float`) |
+| `"diabetes"` | `"diabetes"` | `"diabetes"` |
+| `True` | `true` | `True` |
+| `None` | `null` | `None` |
+| `np.int64(42)` | `42` | `42` (`int`, not `np.int64`) |
+| `np.float64(3.14)` | `3.14` | `3.14` (`float`, not `np.float64`) |
+| `np.array([[309],[354]])` | `[[309],[354]]` | `[[309],[354]]` (`list`, not `ndarray`) |
 
-### Numpy Arrays
-
-`np.ndarray.tolist()` recursively produces nested JSON arrays of Python scalars.
-
-```json
-[[309], [354]]
-```
+Numpy types are coerced to Python primitives and lists on serialisation and are not
+restored by the framework. Constructors that require numpy types must convert internally
+(e.g. `Experiment.__init__` calls `np.atleast_2d(ns)` on its `ns` argument).
 
 ### Lists and Tuples
 
-Lists produce JSON arrays; tuples produce a `__tuple__` wrapper to preserve the type
-distinction on reconstruction.
-
-```json
-[{"__class__": "problems.EmpiricalDataProblem", "...": "..."}, "..."]
-{"__tuple__": [{"__import__": "numpy.log"}]}
-```
+| Python in | JSON | Python out |
+|-----------|------|------------|
+| `[a, b]` | `[to_json(a), to_json(b)]` | `[from_json(a), from_json(b)]` |
+| `(a, b)` | `{"__tuple__": [to_json(a), to_json(b)]}` | `(from_json(a), from_json(b))` |
 
 ### Named Functions and Ufuncs
 
-Any object for which `_is_named_import` returns `True` — in practice named functions and
-numpy ufuncs used as problem transforms.
+**In:** `numpy.log`
 
-```json
-{"__import__": "numpy.log"}
-```
+**JSON:** `{"__import__": "numpy.log"}`
+
+**Out:** `numpy.log` (the same object, recovered via `importlib`)
 
 ### Problem Instances
 
-`EmpiricalDataProblem` is a Transparent Class; `inspect.signature(__init__)` gives dataset,
-target, and transform fields. The `x_transforms` tuple becomes a `__tuple__` wrapper.
+**In:** `EmpiricalDataProblem('diabetes', 'target', True, (numpy.log,))`
 
+**JSON:**
 ```json
 {
   "__class__": "problems.EmpiricalDataProblem",
@@ -156,12 +158,13 @@ target, and transform fields. The `x_transforms` tuple becomes a `__tuple__` wra
 }
 ```
 
+**Out:** `EmpiricalDataProblem('diabetes', 'target', True, (numpy.log,))`
+
 ### Estimator Instances
 
-`RidgeEM` and `RidgeLOOCV` are Transparent Classes; `inspect.signature(__init__)` gives
-the hyperparameter spec. Computed attributes (`coef_`, `alpha_`, etc.) appear only when
-`include_computed` selects them.
+**In:** `RidgeEM(fit_intercept=True, normalize=True, epsilon=1e-6)`
 
+**JSON:**
 ```json
 {
   "__class__": "fastridge.RidgeEM",
@@ -171,21 +174,23 @@ the hyperparameter spec. Computed attributes (`coef_`, `alpha_`, etc.) appear on
 }
 ```
 
+**Out:** `RidgeEM(fit_intercept=True, normalize=True, epsilon=1e-6)`
+
 ### Metric Instances
 
-`PredictionR2`, `FittingTime`, etc. are Transparent Classes with no `__init__` parameters.
-Serialises to `__class__` only; reconstruction via `PredictionR2()` is functionally
-equivalent since metrics are stateless.
+**In:** `PredictionR2()`
 
-```json
-{"__class__": "experiments.PredictionR2"}
-```
+**JSON:** `{"__class__": "experiments.PredictionR2"}`
 
-### Experiment Instances
+**Out:** `PredictionR2()` (equivalent stateless instance)
 
-`Experiment` and `ExperimentWithPerSeriesSeeding` are Transparent Classes that also carry
-computed attributes set during `run()`. Run files are written twice — at the start and on
-completion — using an explicit whitelist of computed attrs:
+## Changes to Experiment Runners
+
+`Experiment` and `ExperimentWithPerSeriesSeeding` are already Transparent Classes. 
+Non-constructor parameters relevant for run files are added as computed fields
+(as is already the case for `run_id_`).
+Then run files are written twice, at the start and on completion of `run` using
+an explicit whitelist:
 
 ```python
 _RUN_FILE_STATE = [
@@ -195,17 +200,21 @@ _RUN_FILE_STATE = [
 
 def _write_run_file(exp):
     path = os.path.join(CACHE_DIR, 'runs', f'{exp.run_id_}.json')
-    _save_json(path, to_json(exp, include_computed=_RUN_FILE_STATE))
+    save_json(path, to_json(exp, include_computed=_RUN_FILE_STATE))
 ```
 
 Result arrays (`prediction_r2_` etc.) are excluded — they replicate metric cache content.
 `problem_keys_` and `estimator_keys_` are cache-directory links set at the start of `run()`.
+`ns` round-trips via `np.atleast_2d` in `__init__`.
 
+**In:** `Experiment([prob], [est], reps=10, ns=np.array([[309]]), seed=1, stats=[prediction_r2], verbose=False)` after `run()`
+
+**JSON:**
 ```json
 {
   "__class__": "experiments.Experiment",
-  "problems": [{"__class__": "problems.EmpiricalDataProblem", "...": "..."}],
-  "estimators": [{"__class__": "fastridge.RidgeEM", "...": "..."}],
+  "problems": [{"__class__": "problems.EmpiricalDataProblem", "dataset": "diabetes", "...": "..."}],
+  "estimators": [{"__class__": "fastridge.RidgeEM", "fit_intercept": true, "...": "..."}],
   "reps": 10,
   "ns": [[309]],
   "seed": 1,
@@ -220,16 +229,17 @@ Result arrays (`prediction_r2_` etc.) are excluded — they replicate metric cac
 }
 ```
 
+**Out:** `Experiment([prob], [est], reps=10, ns=np.array([[309]]), seed=1, stats=[PredictionR2()], verbose=False)` with `run_id_`, timestamps, environment, and keys restored via `setattr`
+
 ---
 
 ## Module Changes
 
 New file `experiments/util.py`:
-- `Computation` — base class providing `get_params()` via `__init__` inspection for sklearn compatibility; inherited by `Experiment` and `ExperimentWithPerSeriesSeeding`
-- `to_json(obj, include_computed=False)` — recursive serialisation
+- `to_json(obj, include_computed=False)` — recursive serialisation; returns a JSON-native Python object
 - `from_json(data)` — recursive reconstruction
-- `_save_json(path, data)` — atomic JSON write via tempfile + `os.replace` (moved from `experiments.py`)
-- `_load_metric_file(path)` — metric file load with empty default (moved from `experiments.py`)
+- `save_json(path, data, indent=2)` — atomic JSON write via tempfile + `os.replace` (moved from `experiments.py`); `indent=None` produces compact single-line output
+- `load_json(path, default=None)` — read and deserialise a JSON file via `from_json`; return `default` if the file does not exist
 
-`experiments.py` imports `Computation`, `to_json`, `from_json`, `_save_json`, and
-`_load_metric_file` from `util.py`. `problems.py` imports nothing from `util.py`.
+`experiments.py` imports `to_json`, `from_json`, `save_json`, and
+`load_json` from `util.py`. `problems.py` imports nothing from `util.py`.
