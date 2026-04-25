@@ -1,96 +1,167 @@
 # Unified JSON Serialization Design
 
-## Motivation
+## Motivation and Goal
 
-Three object families need JSON serialization for run files, cache keys, and future fitted-model
-caching: problem dataclasses, sklearn-style estimators, and experiment runners. Each family has
-its own introspection API. The goal is a single recursive protocol that covers all three with
-minimal footprint in the content modules (`problems.py`, `experiments.py`, `fastridge.py`).
+The current code for writing experiment run files seems brittle and has a large footprint 
+in the content modules (`problems.py`, `experiments.py`, `fastridge.py`). This refactoring
+replaces this code through the simple invocation of a newly introduction JSON serialisation
+framework.
+
+The goal is a single recursive protocol that covers all required object types for experiment
+run files:
+
+1. Experiment classes themselves
+2. Problem definitions and their contained objects (transforms, etc.)
+3. Estimators (sklearn compatible)
+
+In particular, we are aiming for a future proof design that can flexible serialise unfitted
+estimators (current use case) and unfitted estimators (future use case for result serialisation).
+
+The JSON framework should:
+
+1. Have minimal footprint in the content modules, i.e., be introduced in a new module
+`utils.py` (or similar)
+2. Be realised via recursive functions with a minimal number of cases required to cover
+the above-mentioned object types with high readability (it may introduce reasonable 
+conventions / restrictions to the content objects in terms of type coercions).
+3. And be otherwise as general as possible (individual cases should be widened to the
+simplest / most general boundaries that are still self-evidently correct).
+
+Run file writing should then be a simple one line invocation of the serialisation
+framework.
 
 ---
 
-## Scope
+## Abstractions
 
-In scope:
-- Spec and computed-state serialization for problems, estimators, and experiments
-- Callable (function) serialization for problem transform fields
-- `Computation` base class giving experiments `get_params()` via `__init__` inspection
-- New `util.py` module housing the protocol and shared I/O helpers
+To required object types are covered via the following abstract types:
 
-Out of scope (planned, not implemented):
-- Fitted estimator serialization (JSON or pickle)
-- Metric file format changes
-- Cache directory structure changes
+1. **Numpy `ArrayLike`** containing all primitive Python types as well as lists and tuples.
+2. **Named imports** that can be reconstructed via a named import from a Python module in
+scope of the module loader. This covers `numpy.ufunc` that appear as transforms.
+3. **Transparent Classes** where the parameters of the init method correspond to attributes
+sufficient for reconstructing an equivalent object.
+
+The equivalence in Case 3 excludes potentially **computed attributes** (marked with a trailing
+underscore `_`) as used in sklearn estimators. However, these can optionally also be serialised
+and deserialised with the framework.
 
 ---
 
 ## Protocol
 
-### `to_json(obj, include_computed=False)`
+### Serialisation: `to_json(obj, include_computed=False)`
 
-Recursive function in `util.py`. Serializes the spec of any supported object. The
-`include_computed` parameter controls which computed (`_`-suffix) attributes are included
-alongside the spec in a flat output:
+Recursive function in `util.py`. The `include_computed` parameter controls which computed
+(`_`-suffix) attributes are appended flat to the spec output for Transparent Class objects:
 
 - `False` (default): spec only
-- `True`: all `_`-suffix attributes from `obj.__dict__`
+- `True`: all `_`-suffix attributes present in `obj.__dict__`
 - `list[str]`: only the named attributes (e.g. `['run_id_', 'timestamp_start_']`)
 
-The list form exists because not all computed attributes belong in every context: result
-arrays (`prediction_r2_` etc.) replicate cache content and should be excluded from run
-files; future fitted estimator attributes stored as separate files similarly should be
-excluded. Callers specify exactly what they need.
+`include_computed` does not propagate into recursive calls — nested objects are always
+serialised spec-only regardless of the top-level setting.
 
-**Dispatch order** (applied to `obj` for the spec portion):
+**Dispatch table:**
 
 | Condition | Output |
 |-----------|--------|
-| `None`, `bool`, `int`, `float`, `str` | `obj` (as-is) |
+| `obj is None` or `isinstance(obj, (bool, int, float, str))` | `obj` |
 | `isinstance(obj, np.integer)` | `int(obj)` |
 | `isinstance(obj, np.floating)` | `float(obj)` |
 | `isinstance(obj, np.ndarray)` | `obj.tolist()` |
 | `isinstance(obj, list)` | `[to_json(item) for item in obj]` |
-| `isinstance(obj, tuple)` | `{"__tuple__": [to_json(item) for item in obj]}` — escape hatch for explicit tuples in non-frozen contexts |
-| `dataclasses.is_dataclass(obj) and not isinstance(obj, type)` | see Dataclass below |
-| `hasattr(obj, 'get_params')` | see Get-params below |
-| `callable(obj)` | see Callable below |
-| otherwise | `TypeError` |
+| `isinstance(obj, tuple)` | `{"__tuple__": [to_json(item) for item in obj]}` |
+| `_is_named_import(obj)` | `{"__import__": f"{obj.__module__}.{obj.__qualname__}"}` |
+| default (Transparent Class) | `{"__class__": cls_ref, **{k: to_json(v) for k, v in _init_params(obj).items()}, **{k: to_json(getattr(obj, k)) for k in _computed_keys(obj, include_computed)}}` |
 
-**Dataclass objects** (problems, transform wrappers like `PolynomialExpansion`):
+If the default case cannot enumerate init params or a param is not stored as a same-named
+attribute, `to_json` raises `TypeError`.
 
-Non-frozen dataclasses emit `__class__`; values are recursively serialized via the normal
-dispatch (tuples → `{"__tuple__": ...}`):
+Throughout:
+- `cls_ref = f"{type(obj).__module__}.{type(obj).__qualname__}"`
+- `_init_params(obj)`: `{name: getattr(obj, name) for name, p in inspect.signature(type(obj).__init__).parameters.items() if name != 'self' and p.kind not in (VAR_POSITIONAL, VAR_KEYWORD)}`
+- `_computed_keys(obj, include_computed)`: the selected `_`-suffix keys from `obj.__dict__`
+- `_is_named_import(obj)`: `getattr(importlib.import_module(obj.__module__), obj.__qualname__) is obj`, returning `False` on any exception; verifies reconstructability rather than relying on structural heuristics
+
+### Deserialisation: `from_json(data)`
+
+| Input | Reconstruction |
+|-------|----------------|
+| `None`, `bool`, `int`, `float`, `str` | `data` |
+| `list` | `[from_json(item) for item in data]` |
+| `dict` with `"__tuple__"` | `tuple(from_json(item) for item in data["__tuple__"])` |
+| `dict` with `"__import__"` | `getattr(importlib.import_module(module), name)` where `module, _, name = data["__import__"].rpartition(".")` |
+| `dict` with `"__class__"` | `cls(**{k: from_json(v) for k in data if k != '__class__' and not k.endswith('_')})` then `setattr(obj, k, from_json(data[k]))` for `_`-suffix keys |
+| plain `dict` | `{k: from_json(v) for k, v in data.items()}` |
+
+For `__class__`: `module, _, name = data["__class__"].rpartition(".")`, `cls = getattr(importlib.import_module(module), name)`. Init-time normalisation is idempotent because `to_json` stores the already-stored attribute value, not the original constructor argument.
+
+---
+
+## Behaviour for Relevant Types
+
+### Scalars and Numpy Scalars
+
+Python primitives pass through as-is. `np.integer` and `np.floating` are coerced to Python
+`int` and `float` respectively before writing.
+
+```json
+42
+3.14
+"diabetes"
+true
+null
+```
+
+### Numpy Arrays
+
+`np.ndarray.tolist()` recursively produces nested JSON arrays of Python scalars.
+
+```json
+[[309], [354]]
+```
+
+### Lists and Tuples
+
+Lists produce JSON arrays; tuples produce a `__tuple__` wrapper to preserve the type
+distinction on reconstruction.
+
+```json
+[{"__class__": "problems.EmpiricalDataProblem", "...": "..."}, "..."]
+{"__tuple__": [{"__import__": "numpy.log"}]}
+```
+
+### Named Functions and Ufuncs
+
+Any object for which `_is_named_import` returns `True` — in practice named functions and
+numpy ufuncs used as problem transforms.
+
+```json
+{"__import__": "numpy.log"}
+```
+
+### Problem Instances
+
+`EmpiricalDataProblem` is a Transparent Class; `inspect.signature(__init__)` gives dataset,
+target, and transform fields. The `x_transforms` tuple becomes a `__tuple__` wrapper.
+
 ```json
 {
   "__class__": "problems.EmpiricalDataProblem",
   "dataset": "diabetes",
   "target": "target",
-  "x_transforms": [{"__class__": "problems.PolynomialExpansion", "degree": 2}]
+  "zero_variance_filter": true,
+  "x_transforms": {"__tuple__": [{"__import__": "numpy.log"}]}
 }
 ```
 
-Frozen dataclasses emit `__frozenclass__` instead of `__class__`. Frozen dataclasses
-conventionally use tuples for sequence fields (mutability would be inconsistent with
-immutability). To honour this convention and keep the output readable, tuple field values
-are emitted as plain JSON arrays — bypassing the `{"__tuple__": ...}` dispatch — and
-`from_json` coerces them back on reconstruction:
-```json
-{
-  "__frozenclass__": "problems.EmpiricalDataProblem",
-  "dataset": "diabetes",
-  "target": "target",
-  "x_transforms": [{"__class__": "problems.PolynomialExpansion", "degree": 2}]
-}
-```
-The `__frozenclass__` key is `f"{type(obj).__module__}.{type(obj).__qualname__}"`.
-Emission is triggered by `obj.__dataclass_params__.frozen`.
+### Estimator Instances
 
-Fields come from `dataclasses.fields(obj)`.
-`include_computed` has no effect on dataclasses (they carry no `_`-suffix convention).
+`RidgeEM` and `RidgeLOOCV` are Transparent Classes; `inspect.signature(__init__)` gives
+the hyperparameter spec. Computed attributes (`coef_`, `alpha_`, etc.) appear only when
+`include_computed` selects them.
 
-**Get-params objects** (estimators, experiments via `Computation`):
-
-Spec-only output (`include_computed=False`):
 ```json
 {
   "__class__": "fastridge.RidgeEM",
@@ -100,142 +171,21 @@ Spec-only output (`include_computed=False`):
 }
 ```
 
-With `include_computed=['coef_', 'alpha_']`, computed attrs are merged flat:
+### Metric Instances
+
+`PredictionR2`, `FittingTime`, etc. are Transparent Classes with no `__init__` parameters.
+Serialises to `__class__` only; reconstruction via `PredictionR2()` is functionally
+equivalent since metrics are stateless.
+
 ```json
-{
-  "__class__": "fastridge.RidgeEM",
-  "fit_intercept": true,
-  "normalize": true,
-  "epsilon": 1e-06,
-  "coef_": [0.1, 0.2],
-  "alpha_": 1.5
-}
+{"__class__": "experiments.PredictionR2"}
 ```
 
-Params come from `obj.get_params(deep=False)`; values are recursively serialized.
-Computed attrs are merged at the top level — the trailing `_` is the discriminator between
-spec keys and computed keys, making a separate nesting level unnecessary.
+### Experiment Instances
 
-**Callable objects** (numpy ufuncs and other importable named functions):
-```json
-{"__callable__": "numpy.log"}
-```
-Constructed as `f"{obj.__module__}.{obj.__qualname__}"`.
-Lambdas and closures are explicitly unsupported: `to_json` raises `TypeError` with a message
-directing the user to wrap the callable in a named dataclass instead.
-
-### `from_json(data)`
-
-Inverse of `to_json`. Dispatch on the shape of `data`:
-
-| Input | Reconstruction |
-|-------|----------------|
-| `None`, `bool`, `int`, `float`, `str` | `data` (as-is) |
-| `list` | `[from_json(item) for item in data]` |
-| `dict` with `"__tuple__"` | `tuple(from_json(item) for item in data["__tuple__"])` |
-| `dict` with `"__callable__"` | `importlib` import + `getattr` |
-| `dict` with `"__frozenclass__"` | `importlib` import + `ClassName(**spec_kwargs)` with list kwargs coerced to tuples |
-| `dict` with `"__class__"` | `importlib` import + `ClassName(**spec_kwargs)`, then `setattr` for `_`-suffix keys |
-| plain `dict` | `{k: from_json(v) for k, v in data.items()}` |
-
-Callable reconstruction: `"numpy.log"` →
-`getattr(importlib.import_module("numpy"), "log")`.
-
-Class reconstruction: the module and class name are split from `__class__` (or
-`__frozenclass__`). The class is imported via `importlib`. Keys not ending in `_`
-(excluding the marker key) are passed to `__init__`; keys ending in `_` are applied via
-`setattr` after construction. Both dataclasses and get-params classes reconstruct via
-`__init__` — no `set_params()` is needed.
-
-Frozen dataclass reconstruction (`__frozenclass__`): constructor kwargs that are plain
-lists are coerced to tuples before the `__init__` call. No `setattr` pass is needed —
-frozen dataclasses carry no `_`-suffix computed state. This coercion relies on the
-convention that frozen dataclass fields use tuples, not lists, for sequences; a field that
-genuinely holds a list cannot appear inside a `__frozenclass__` object (use a non-frozen
-dataclass in that case).
-
-Init-time normalization is idempotent: `np.atleast_2d` on an already-2D array is a no-op;
-resolved defaults (e.g. `est_names` derived from estimators) round-trip correctly because
-`to_json` stores the stored value, not the original argument.
-
----
-
-## `Metric` and the Get-params Convention
-
-`Metric` subclasses (`PredictionR2`, `FittingTime`, etc.) appear in the `stats` parameter of
-experiment `__init__` and therefore must be serializable. They carry no parameters (all logic
-is in static methods), so `get_params()` returns `{}`:
-
-```python
-class Metric:
-    def get_params(self, deep=False):
-        return {}
-```
-
-`to_json(prediction_r2)` → `{"__class__": "experiments.PredictionR2"}`.
-`from_json({"__class__": "experiments.PredictionR2"})` → `PredictionR2()`.
-
-Since metrics are stateless, reconstructed instances are functionally equivalent to the
-module-level singletons. The `get_params` dispatch branch is reached before the `callable`
-branch, so the callable path is not involved.
-
----
-
-## `Computation` Base Class
-
-A thin base class in `util.py` implementing `get_params()` via `__init__` signature
-inspection, mirroring sklearn's `BaseEstimator` without inheriting from it:
-
-```python
-import inspect
-
-class Computation:
-    def get_params(self, deep=False):
-        sig = inspect.signature(type(self).__init__)
-        return {
-            name: getattr(self, name)
-            for name in sig.parameters
-            if name != 'self'
-        }
-```
-
-Both `Experiment` and `ExperimentWithPerSeriesSeeding` inherit from `Computation`.
-No other change is required in `experiments.py` — `to_json` dispatches on `hasattr(obj,
-'get_params')`, which covers both `Computation` subclasses and sklearn estimators (which
-bring `get_params` from `BaseEstimator`).
-
-The `deep=False` parameter is accepted for API compatibility but ignored: experiment params
-are not themselves estimators, so deep param traversal is not applicable here.
-
----
-
-## Computed State and the Run File
-
-The `_`-suffix convention (shared with sklearn) distinguishes spec attributes (set in
-`__init__`) from computed attributes (set during `run()` or `fit()`).
-
-For experiments, `run()` sets these `_`-suffix attributes before the first run-file write:
-
-- `run_id_` — unique identifier for this run
-- `timestamp_start_` — ISO timestamp captured at the start of `run()`
-- `environment_` — `{'python': sys.version.split()[0], 'platform': platform.platform()}`
-
-Before the second write (after completion):
-
-- `timestamp_end_` — ISO timestamp captured on completion
-
-Two further computed attributes are set at the start of `run()` and serve as forward links
-from the run file to the cache directories:
-
-- `problem_keys_` — `[_cache_key(p) for p in self.problems]`
-- `estimator_keys_` — `[_cache_key(e) for e in self.estimators]`
-
-The spec already records the full params of each problem and estimator for human
-readability; the keys add machine-browsable links to the cache directory tree.
-
-Result arrays (`prediction_r2_` etc.) are also `_`-suffix attrs but are deliberately
-excluded from run files — they replicate cache content already stored in the metric JSON
-files. `_write_run_file` uses the list form of `include_computed` to be explicit:
+`Experiment` and `ExperimentWithPerSeriesSeeding` are Transparent Classes that also carry
+computed attributes set during `run()`. Run files are written twice — at the start and on
+completion — using an explicit whitelist of computed attrs:
 
 ```python
 _RUN_FILE_STATE = [
@@ -248,48 +198,38 @@ def _write_run_file(exp):
     _save_json(path, to_json(exp, include_computed=_RUN_FILE_STATE))
 ```
 
-**Recursive safety**: `include_computed` does not propagate into nested `to_json` calls.
-Spec values (estimators, problems) are always serialized with `include_computed=False`,
-so fitted state on member estimators can never appear in the run file accidentally.
-Experiments only fit cloned copies of member estimators anyway, so the members themselves
-carry no fitted state; the whitelist form of `include_computed` is a further layer of
-defence. The whitelist may later evolve to an exclusion list if the set of excluded
-attributes becomes easier to name than the included ones.
+Result arrays (`prediction_r2_` etc.) are excluded — they replicate metric cache content.
+`problem_keys_` and `estimator_keys_` are cache-directory links set at the start of `run()`.
 
-A future `include_computed='deep'` mode (or similar) could propagate the flag recursively
-into nested get-params objects, enabling full serialization of fitted experiment members.
-This is not needed at present.
-
-
----
-
-## Forward Plan: Fitted Estimator Serialization
-
-Not in scope now, but the design accommodates it. Two paths, selectable per experiment:
-
-**JSON path**: `to_json(est, include_computed=True)` serializes all `_`-suffix attributes
-flat alongside the spec. For `RidgeEM` and `RidgeLOOCV` whose fitted state is small (numpy
-arrays of length `p`), this produces a fully human-readable, version-stable cache.
-
-**Pickle path**: `save_estimator(est, path)` / `load_estimator(path)` using `pickle`.
-Suitable for third-party estimators with complex fitted state (pipelines, forests, sparse
-matrices).
-
-The experiment class will expose an `estimator_cache: str` parameter (`'json'` or
-`'pickle'`, defaulting to `'pickle'` for safety) to select the path per run.
+```json
+{
+  "__class__": "experiments.Experiment",
+  "problems": [{"__class__": "problems.EmpiricalDataProblem", "...": "..."}],
+  "estimators": [{"__class__": "fastridge.RidgeEM", "...": "..."}],
+  "reps": 10,
+  "ns": [[309]],
+  "seed": 1,
+  "stats": [{"__class__": "experiments.PredictionR2"}],
+  "verbose": false,
+  "run_id_": "Experiment__20260424-143022-ab3f",
+  "timestamp_start_": "2026-04-24T14:30:22.123456",
+  "timestamp_end_": "2026-04-24T14:32:10.456789",
+  "environment_": {"python": "3.11.0", "platform": "macOS-15.0-arm64"},
+  "problem_keys_": ["abc123..."],
+  "estimator_keys_": ["def456..."]
+}
+```
 
 ---
 
-## Module Structure
+## Module Changes
 
 New file `experiments/util.py`:
-- `Computation` — `get_params()` via `__init__` inspection
-- `to_json(obj, include_computed=False)` — recursive serialization
+- `Computation` — base class providing `get_params()` via `__init__` inspection for sklearn compatibility; inherited by `Experiment` and `ExperimentWithPerSeriesSeeding`
+- `to_json(obj, include_computed=False)` — recursive serialisation
 - `from_json(data)` — recursive reconstruction
-- `_save_json(path, data)` — atomic JSON write (moved from `experiments.py`)
-- `_load_metric_file(path)` — metric file load with default (moved from `experiments.py`)
+- `_save_json(path, data)` — atomic JSON write via tempfile + `os.replace` (moved from `experiments.py`)
+- `_load_metric_file(path)` — metric file load with empty default (moved from `experiments.py`)
 
-`experiments.py` imports from `util.py`; `problems.py` imports nothing from `util.py`
-(problems are pure dataclasses; `to_json` handles them externally).
-
-No other new modules are introduced at this stage.
+`experiments.py` imports `Computation`, `to_json`, `from_json`, `_save_json`, and
+`_load_metric_file` from `util.py`. `problems.py` imports nothing from `util.py`.
