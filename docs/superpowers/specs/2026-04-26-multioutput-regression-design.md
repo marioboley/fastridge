@@ -47,7 +47,7 @@ rotating each entry back to the original feature space and applying output resca
 This function is a direct extraction of the current EM body in `RidgeEM.fit`, with no change to
 the numerical algorithm.
 
-### `em_max_marginal_posterior_ridge_multi_target(c, s, n, p, epsilon=1e-8, t2=True)`
+### `em_max_marginal_posterior_ridge_multi_target(c, s, n, p, epsilon=1e-8, t2=True, trace=False)`
 
 Per-target multi-output variant. Each target column runs an independent EM, producing independent
 `sigma_square_t` and `tau_square_t` estimates.
@@ -59,11 +59,16 @@ Returns `(sigma_arr, tau_arr, beta_mat, n_iter_arr)`:
 - `sigma_arr`, `tau_arr`, `n_iter_arr`: 1D arrays of length `n_targets`
 - `beta_mat`: 2D array of shape `(r, n_targets)`
 
+When `trace=True`, additionally returns `(sigma_hist, tau_hist, beta_hist)` — each a list of
+length `n_targets` whose `t`-th entry is the per-iteration history for target `t`. Because
+different targets may converge in different numbers of iterations, the histories are ragged (lists
+of lists / lists of arrays) rather than rectangular arrays.
+
 Internally a loop over targets calling
-`em_max_marginal_posterior_ridge(c[:, t], s, n, p, epsilon, t2)` for each `t`. This structure
-contains no EM logic of its own (no duplication), adds zero overhead to the 1D path (this
-function is never called for 1D `y`), and is straightforwardly parallelisable with `prange` for
-Numba. Trace is not supported in the multi-target variant.
+`em_max_marginal_posterior_ridge(c[:, t], s, n, p, epsilon, t2, trace=trace)` for each `t` and
+aggregating the results. This structure contains no EM logic of its own (no duplication), adds
+zero overhead to the 1D path (this function is never called for 1D `y`), and is
+straightforwardly parallelisable with `prange` for Numba (non-trace path).
 
 A future `em_max_marginal_posterior_ridge_joint` (shared tau across targets, pooled M-step
 statistics) is a distinct algorithm and will be a separate function — not a parametric variant of
@@ -110,7 +115,20 @@ extension analogous to joint-tau in EM.
 ## Backward Compatibility
 
 1D `y` input: all output attribute shapes and values are identical to current behaviour. No
-existing code path is altered.
+existing code path is altered, with one deliberate exception:
+
+**`coefs_` trace space (behaviour change):** Currently `coefs_[i]` stores `V @ beta_i` — the
+coefficient in the normalized (centered and scaled) feature space, not the original feature space.
+The new design controls this via a `trace_space` constructor parameter on `RidgeEM`:
+
+- `trace_space='original'` (default): applies `V` rotation and `b_y / b_x` rescaling, so
+  `coefs_[i]` is in the same space as `coef_`. More coherent for reporting.
+- `trace_space='projected'`: stores raw `beta_i` as returned by the free function — the space
+  where the EM optimization runs. Useful for convergence visualisation of the iterates.
+
+The old implicit behaviour (V rotation applied, no rescaling) is not exposed as an option; it
+is unlikely anyone consciously relied on this space. Exact backward compatibility for `coefs_`
+can be added later if needed (see Future Work).
 
 2D `y` input with `n_targets == 1`: `coef_` is `(1, p)`, `alpha_` is `(1,)` — consistent with
 scikit-learn's `RidgeCV(alpha_per_target=True)` convention.
@@ -141,3 +159,6 @@ from fastridge import (RidgeEM, RidgeLOOCV,
   or reimplementing the numerical M-step (`scipy.minimize`) in a JIT-compatible form, and (b)
   introducing a `max_iter` parameter to pre-allocate the trace matrix instead of appending to
   dynamic lists.
+- **`trace_space='normalized'`**: a third option exposing the old implicit behaviour — V rotation
+  applied but no rescaling. Not included now as no known use case exists for this intermediate
+  space.
