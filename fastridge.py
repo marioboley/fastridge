@@ -247,8 +247,8 @@ class RidgeEM(MultiOutputMixin, BaseEstimator, RegressorMixin):
     """
 
     def __init__(self, epsilon=0.00000001, fit_intercept=True, normalize=True,
-                 closed_form_m_step=True, trace=False, verbose=False, t2=True,
-                 trace_space='original'):
+                 closed_form_m_step=True, t2=True, trace=False, trace_space='original',
+                 verbose=False):
         self.epsilon = epsilon
         self.fit_intercept = fit_intercept
         self.normalize = normalize
