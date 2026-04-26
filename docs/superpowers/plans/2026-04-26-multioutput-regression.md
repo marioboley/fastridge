@@ -4,7 +4,7 @@
 
 **Goal:** Add multi-target support to `RidgeEM` and `RidgeLOOCV` by extracting the EM loop into public free functions and dispatching on `y.ndim` in both class wrappers.
 
-**Architecture:** Two public free functions (`em_max_marginal_posterior_ridge`, `em_max_marginal_posterior_ridge_multi_target`) operate in SVD-projected space. The `closed_form_m_step` parameter and both M-step branches live inside the free function — the wrapper is thin (preprocess → SVD → call free function → postprocess). `neg_q_function` moves from `RidgeEM` static method to module level to support the numerical M-step inside the free function. `RidgeLOOCV` multi-target support is added inline without free functions.
+**Architecture:** Two public free functions (`em_max_marginal_posterior_ridge`, `em_max_marginal_posterior_ridge_multi_target`) operate in SVD-projected space. The `closed_form_m_step` parameter and both M-step branches live inside the free function — the wrapper is thin (preprocess → SVD → call free function → postprocess). `neg_q_function` moves from `RidgeEM` static method to module level. `RidgeLOOCV` multi-target support is added inline without free functions. Number of targets is denoted `q` (paper notation) throughout.
 
 **Tech Stack:** numpy, scipy.linalg.svd, scipy.optimize.minimize, pytest
 
@@ -14,7 +14,7 @@
 
 ## File Structure
 
-- **Modify:** `fastridge.py` — move `neg_q_function` to module level; add two free functions before `RidgeEM`; update `RidgeEM.__init__` (add `trace_space`) and `RidgeEM.fit` (thin wrapper, remove `neg_q_function` static method); update `RidgeLOOCV.fit`
+- **Modify:** `fastridge.py` — move `neg_q_function` to module level; add two free functions before `RidgeEM`; update `RidgeEM.__init__` (add `trace_space`) and `RidgeEM.fit` (unified thin wrapper, remove `neg_q_function` static method); update `RidgeLOOCV.fit`
 - **Create:** `tests/test_fastridge.py` — pytest tests for new behaviour (backward compat, 2D shapes, trace)
 
 ---
@@ -238,13 +238,13 @@ def em_max_marginal_posterior_ridge_multi_target(c, s, n, p, y_sqnorm, epsilon=1
 
     Parameters
     ----------
-    c : ndarray, shape (r, n_targets)
-        Projected observations for each target.
+    c : ndarray, shape (r, q)
+        Projected observations for each of the q targets.
     s : ndarray, shape (r,)
         Singular values.
     n, p : int
         Original dataset dimensions.
-    y_sqnorm : ndarray, shape (n_targets,)
+    y_sqnorm : ndarray, shape (q,)
         Per-target squared norms of the preprocessed target vectors.
     epsilon, t2, closed_form_m_step, verbose : same as em_max_marginal_posterior_ridge.
     trace : bool
@@ -253,11 +253,11 @@ def em_max_marginal_posterior_ridge_multi_target(c, s, n, p, y_sqnorm, epsilon=1
 
     Returns
     -------
-    sigma_arr, tau_arr : ndarray, shape (n_targets,)
-    beta_mat : ndarray, shape (r, n_targets)
-    n_iter_arr : ndarray of int, shape (n_targets,)
+    sigma_arr, tau_arr : ndarray, shape (q,)
+    beta_mat : ndarray, shape (r, q)
+    n_iter_arr : ndarray of int, shape (q,)
         When trace=True, additionally returns sigma_hist, tau_hist, beta_hist —
-        each a list of length n_targets whose t-th entry is the history for target t.
+        each a list of length q whose t-th entry is the history for target t.
 
     Examples
     --------
@@ -295,15 +295,15 @@ Expected: FAIL with `NotImplementedError`
 Replace `raise NotImplementedError` with:
 
 ```python
-    n_targets = c.shape[1]
+    q = c.shape[1]
     r = len(s)
-    sigma_arr = np.empty(n_targets)
-    tau_arr = np.empty(n_targets)
-    beta_mat = np.empty((r, n_targets))
-    n_iter_arr = np.empty(n_targets, dtype=int)
+    sigma_arr = np.empty(q)
+    tau_arr = np.empty(q)
+    beta_mat = np.empty((r, q))
+    n_iter_arr = np.empty(q, dtype=int)
     if trace:
         sigma_hist_list, tau_hist_list, beta_hist_list = [], [], []
-    for t in range(n_targets):
+    for t in range(q):
         result = em_max_marginal_posterior_ridge(
             c[:, t], s, n, p, y_sqnorm[t], epsilon, t2, closed_form_m_step, verbose, trace)
         if trace:
@@ -344,13 +344,15 @@ git commit -m "feat: add em_max_marginal_posterior_ridge_multi_target free funct
 
 ---
 
-## Task 3: Update `RidgeEM` — thin wrapper for 1D, `trace_space`, no loop duplication
+## Task 3: Update `RidgeEM` — unified thin wrapper, `trace_space`
 
 **Files:**
 - Modify: `fastridge.py` — `RidgeEM.__init__` and `RidgeEM.fit`
 - Create: `tests/test_fastridge.py`
 
-The `fit` method is replaced with a thin wrapper: preprocess → SVD → call `em_max_marginal_posterior_ridge` → postprocess. The entire EM loop (both M-step branches) is inside the free function. The `neg_q_function` static method is removed from `RidgeEM`. The 2D path raises `NotImplementedError` as a placeholder for Task 4.
+The `fit` method is replaced with a unified thin wrapper. `y` is always reshaped to 2D internally (`q = 1` for 1D input); `em_max_marginal_posterior_ridge_multi_target` is always called; outputs are squeezed to scalars/1D when `q == 1`. This eliminates the 1D/2D dispatch duplication. The `neg_q_function` static method is removed from `RidgeEM`.
+
+**Behaviour note:** 2D `y` with 1 column now also produces scalar/1D outputs (same as 1D `y`). The spec said `(1, p)` for this case, but there is no logical reason to maintain matrix shapes when there is only one output.
 
 - [ ] **Step 1: Write failing tests**
 
@@ -431,7 +433,7 @@ def __init__(self, epsilon=0.00000001, fit_intercept=True, normalize=True,
     self.trace_space = trace_space
 ```
 
-- [ ] **Step 4: Replace `RidgeEM.fit` with thin wrapper; remove `neg_q_function` static method**
+- [ ] **Step 4: Replace `RidgeEM.fit` with unified thin wrapper; remove `neg_q_function` static method**
 
 Delete the `neg_q_function` static method from `RidgeEM`. Replace the entire `fit` method body with:
 
@@ -447,36 +449,50 @@ def fit(self, x, y):
     u, s, v_trans = svd(x, full_matrices=False)
     self.svdTime = time.time() - svd_start_time
 
-    if y.ndim == 2:
-        raise NotImplementedError("Multi-target support: see Task 4")
+    Y = y[:, None] if y.ndim == 1 else y
+    q = Y.shape[1]
+    a_y = Y.mean(axis=0) if self.fit_intercept else np.zeros(q)
+    b_y = Y.std(axis=0) if self.normalize else np.ones(q)
+    Y_norm = (Y - a_y) / b_y
+    y_sqnorm = (Y_norm ** 2).sum(axis=0)
+    c = (u.T @ Y_norm) * s[:, None]
 
-    # --- 1D path ---
-    a_y = y.mean() if self.fit_intercept else 0.0
-    b_y = y.std() if self.normalize else 1.0
-    y = (y - a_y) / b_y
-    y_sqnorm = float(y.dot(y))
-    c = u.T.dot(y) * s
-
-    result = em_max_marginal_posterior_ridge(
+    result = em_max_marginal_posterior_ridge_multi_target(
         c, s, n, p, y_sqnorm, self.epsilon, self.t2,
         self.closed_form_m_step, self.verbose, self.trace)
-    if self.trace:
-        sigma_square, tau_square, beta, self.iterations_, sh, th, bh = result
-        self.sigma_squares_ = sh
-        self.tau_squares_ = th
-        if self.trace_space == 'original':
-            self.coefs_ = [v_trans.T @ b * b_y / b_x for b in bh]
-        else:
-            self.coefs_ = list(bh)
-    else:
-        sigma_square, tau_square, beta, self.iterations_ = result
 
-    beta = v_trans.T.dot(beta)
-    self.coef_ = beta * b_y / b_x
-    self.intercept_ = a_y - self.coef_.dot(a_x)
-    self.sigma_square_ = sigma_square * b_y ** 2
-    self.tau_square_ = tau_square
-    self.alpha_ = 1 / tau_square
+    if self.trace:
+        sigma_arr, tau_arr, beta_mat, n_iter_arr, sh_list, th_list, bh_list = result
+        self.sigma_squares_ = sh_list
+        self.tau_squares_ = th_list
+        if self.trace_space == 'original':
+            coefs_per_target = [
+                [v_trans.T @ b * b_y[t] / b_x for b in bh_list[t]]
+                for t in range(q)]
+        else:
+            coefs_per_target = bh_list
+        self.coefs_ = coefs_per_target
+    else:
+        sigma_arr, tau_arr, beta_mat, n_iter_arr = result
+
+    self.coef_ = (v_trans.T @ beta_mat).T * b_y[:, None] / b_x
+    self.intercept_ = a_y - self.coef_ @ a_x
+    self.sigma_square_ = sigma_arr * b_y ** 2
+    self.tau_square_ = tau_arr
+    self.alpha_ = 1.0 / tau_arr
+    self.iterations_ = n_iter_arr
+
+    if q == 1:
+        self.coef_ = self.coef_[0]
+        self.intercept_ = self.intercept_[0]
+        self.sigma_square_ = self.sigma_square_[0]
+        self.tau_square_ = self.tau_square_[0]
+        self.alpha_ = self.alpha_[0]
+        self.iterations_ = int(self.iterations_[0])
+        if self.trace:
+            self.sigma_squares_ = self.sigma_squares_[0]
+            self.tau_squares_ = self.tau_squares_[0]
+            self.coefs_ = self.coefs_[0]
     return self
 ```
 
@@ -492,15 +508,14 @@ Expected: all 4 new tests pass; all existing doctests pass.
 
 ```bash
 git add fastridge.py tests/test_fastridge.py
-git commit -m "feat: make RidgeEM.fit a thin wrapper; add trace_space parameter"
+git commit -m "feat: unified RidgeEM.fit wrapper with trace_space; q==1 squeeze"
 ```
 
 ---
 
-## Task 4: Update `RidgeEM` for 2D dispatch
+## Task 4: Add `RidgeEM` 2D pytest tests
 
 **Files:**
-- Modify: `fastridge.py` — `RidgeEM.fit` 2D branch
 - Modify: `tests/test_fastridge.py`
 
 - [ ] **Step 1: Write failing tests**
@@ -533,65 +548,17 @@ def test_ridge_em_2d_trace():
     assert len(est.sigma_squares_) == 2
     assert len(est.tau_squares_) == 2
     assert len(est.coefs_) == 2
-
-
-def test_ridge_em_2d_requires_closed_form():
-    X, y, _ = _data()
-    Y = np.column_stack([y, -y])
-    with pytest.raises(ValueError, match='closed_form_m_step'):
-        RidgeEM(closed_form_m_step=False).fit(X, Y)
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
 
 ```bash
-pytest tests/test_fastridge.py::test_ridge_em_2d_coef_shape tests/test_fastridge.py::test_ridge_em_2d_column_matches_1d tests/test_fastridge.py::test_ridge_em_2d_trace tests/test_fastridge.py::test_ridge_em_2d_requires_closed_form -v
+pytest tests/test_fastridge.py::test_ridge_em_2d_coef_shape tests/test_fastridge.py::test_ridge_em_2d_column_matches_1d tests/test_fastridge.py::test_ridge_em_2d_trace -v
 ```
 
-Expected: FAIL (NotImplementedError from placeholder)
+Expected: FAIL (Task 3 not yet done when you reach this step — run after Task 3 completes)
 
-- [ ] **Step 3: Implement 2D branch in `RidgeEM.fit`**
-
-Replace `raise NotImplementedError("Multi-target support: see Task 4")` with the following block (the 1D path that follows handles `y.ndim == 1`):
-
-```python
-    if y.ndim == 2:
-        if not self.closed_form_m_step:
-            raise ValueError(
-                "Multi-target fitting requires closed_form_m_step=True")
-        n_targets = y.shape[1]
-        a_y = y.mean(axis=0) if self.fit_intercept else np.zeros(n_targets)
-        b_y = y.std(axis=0) if self.normalize else np.ones(n_targets)
-        y_norm = (y - a_y) / b_y
-        y_sqnorm = (y_norm ** 2).sum(axis=0)
-        c = (u.T @ y_norm) * s[:, None]
-
-        result = em_max_marginal_posterior_ridge_multi_target(
-            c, s, n, p, y_sqnorm, self.epsilon, self.t2, True, self.verbose, self.trace)
-
-        if self.trace:
-            sigma_arr, tau_arr, beta_mat, n_iter_arr, sh_list, th_list, bh_list = result
-            self.sigma_squares_ = sh_list
-            self.tau_squares_ = th_list
-            if self.trace_space == 'original':
-                self.coefs_ = [
-                    [v_trans.T @ b * b_y[t] / b_x for b in bh_list[t]]
-                    for t in range(n_targets)]
-            else:
-                self.coefs_ = bh_list
-        else:
-            sigma_arr, tau_arr, beta_mat, n_iter_arr = result
-
-        self.coef_ = (v_trans.T @ beta_mat).T * b_y[:, None] / b_x
-        self.intercept_ = a_y - self.coef_ @ a_x
-        self.sigma_square_ = sigma_arr * b_y ** 2
-        self.tau_square_ = tau_arr
-        self.alpha_ = 1.0 / tau_arr
-        self.iterations_ = n_iter_arr
-        return self
-```
-
-- [ ] **Step 4: Run tests**
+- [ ] **Step 3: Run all tests to confirm they now pass**
 
 ```bash
 pytest tests/test_fastridge.py fastridge.py --doctest-modules -v
@@ -599,11 +566,11 @@ pytest tests/test_fastridge.py fastridge.py --doctest-modules -v
 
 Expected: all tests pass.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add fastridge.py tests/test_fastridge.py
-git commit -m "feat: add RidgeEM multi-target support via 2D y dispatch"
+git add tests/test_fastridge.py
+git commit -m "test: add RidgeEM 2D pytest coverage"
 ```
 
 ---
@@ -614,7 +581,7 @@ git commit -m "feat: add RidgeEM multi-target support via 2D y dispatch"
 - Modify: `fastridge.py` — `RidgeLOOCV.fit`
 - Modify: `tests/test_fastridge.py`
 
-The hat-matrix diagonal `h` depends only on `X` and `alpha`, not on `y`. Pre-compute it per alpha outside the target loop to avoid redundant work.
+The hat-matrix diagonal `h` depends only on `X` and `alpha`, not on `y`. Pre-compute it per alpha outside the target loop to avoid redundant work. Same `q == 1` squeeze convention as `RidgeEM`.
 
 - [ ] **Step 1: Write failing tests**
 
@@ -674,52 +641,38 @@ def fit(self, x, y):
         z = u * (s ** 2 / (s ** 2 + alpha))
         h_per_alpha.append((z * u).sum(axis=1))
 
-    if y.ndim == 2:
-        n_targets = y.shape[1]
-        a_y = y.mean(axis=0) if self.fit_intercept else np.zeros(n_targets)
-        b_y = y.std(axis=0) if self.normalize else np.ones(n_targets)
-        y_norm = (y - a_y) / b_y
-        c_mat = (u.T @ y_norm) * s[:, None]
+    Y = y[:, None] if y.ndim == 1 else y
+    q = Y.shape[1]
+    a_y = Y.mean(axis=0) if self.fit_intercept else np.zeros(q)
+    b_y = Y.std(axis=0) if self.normalize else np.ones(q)
+    Y_norm = (Y - a_y) / b_y
+    c_mat = (u.T @ Y_norm) * s[:, None]
 
-        loo_mse_mat = np.zeros((n_targets, len(self.alphas_)))
-        for t in range(n_targets):
-            c_t = c_mat[:, t]
-            for i, alpha in enumerate(self.alphas_):
-                beta_t = c_t / (s ** 2 + alpha)
-                err = y_norm[:, t] - r.dot(beta_t)
-                loo_mse_mat[t, i] = np.mean((err / (1 - h_per_alpha[i])) ** 2)
+    loo_mse_mat = np.zeros((q, len(self.alphas_)))
+    for t in range(q):
+        c_t = c_mat[:, t]
+        for i, alpha in enumerate(self.alphas_):
+            beta_t = c_t / (s ** 2 + alpha)
+            err = Y_norm[:, t] - r.dot(beta_t)
+            loo_mse_mat[t, i] = np.mean((err / (1 - h_per_alpha[i])) ** 2)
 
-        i_stars = np.argmin(loo_mse_mat, axis=1)
-        self.alpha_ = self.alphas_[i_stars]
-        self.loo_mse_ = loo_mse_mat
+    i_stars = np.argmin(loo_mse_mat, axis=1)
+    self.alpha_ = self.alphas_[i_stars]
+    self.loo_mse_ = loo_mse_mat
 
-        beta_mat = np.empty((len(s), n_targets))
-        for t in range(n_targets):
-            beta_mat[:, t] = c_mat[:, t] / (s ** 2 + self.alpha_[t])
-        self.coef_ = (v_trans.T @ beta_mat).T * b_y[:, None] / b_x
-        self.sigma_square_ = loo_mse_mat[np.arange(n_targets), i_stars] * b_y ** 2
-        self.intercept_ = a_y - self.coef_ @ a_x
-        return self
+    beta_mat = np.empty((len(s), q))
+    for t in range(q):
+        beta_mat[:, t] = c_mat[:, t] / (s ** 2 + self.alpha_[t])
 
-    # --- 1D path (unchanged logic) ---
-    a_y = y.mean() if self.fit_intercept else 0.0
-    b_y = y.std() if self.normalize else 1.0
-    y = (y - a_y) / b_y
-    c = u.T.dot(y) * s
+    self.coef_ = (v_trans.T @ beta_mat).T * b_y[:, None] / b_x
+    self.sigma_square_ = loo_mse_mat[np.arange(q), i_stars] * b_y ** 2
+    self.intercept_ = a_y - self.coef_ @ a_x
 
-    self.loo_mse_ = np.zeros_like(self.alphas_)
-    for i in range(len(self.alphas_)):
-        beta = c / (s ** 2 + self.alphas_[i])
-        err = y - r.dot(beta)
-        self.loo_mse_[i] = np.mean((err / (1 - h_per_alpha[i])) ** 2)
-
-    i_star = np.argmin(self.loo_mse_)
-    self.alpha_ = self.alphas_[i_star]
-    beta = c / (s ** 2 + self.alpha_)
-    beta = v_trans.T.dot(beta)
-    self.sigma_square_ = self.loo_mse_[i_star] * b_y ** 2
-    self.coef_ = beta * b_y / b_x
-    self.intercept_ = a_y - self.coef_.dot(a_x)
+    if q == 1:
+        self.coef_ = self.coef_[0]
+        self.intercept_ = self.intercept_[0]
+        self.sigma_square_ = self.sigma_square_[0]
+        self.alpha_ = self.alpha_[0]
     return self
 ```
 
@@ -735,6 +688,6 @@ Expected: all tests pass.
 
 ```bash
 git add fastridge.py tests/test_fastridge.py
-git commit -m "feat: add RidgeLOOCV multi-target support via 2D y dispatch"
+git commit -m "feat: add RidgeLOOCV multi-target support via unified q-target wrapper"
 git push origin dev
 ```
