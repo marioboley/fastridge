@@ -89,13 +89,21 @@ def test_to_json_named_import():
 
 def test_to_json_transparent_class():
     from problems import EmpiricalDataProblem
+    prob = EmpiricalDataProblem('diabetes', 'target', zero_variance_filter=False)
+    result = to_json(prob, include_defaults=False)
+    assert result['__class__'] == 'problems.EmpiricalDataProblem'
+    assert result['dataset'] == 'diabetes'
+    assert 'zero_variance_filter' not in result
+    assert 'x_transforms' not in result
+
+def test_to_json_transparent_class_with_defaults():
+    from problems import EmpiricalDataProblem
     prob = EmpiricalDataProblem('diabetes', 'target', zero_variance_filter=True)
-    result = to_json(prob)
+    result = to_json(prob, include_defaults=True)
     assert result['__class__'] == 'problems.EmpiricalDataProblem'
     assert result['dataset'] == 'diabetes'
     assert result['zero_variance_filter'] is True
     assert result['x_transforms'] == {'__tuple__': []}
-
 
 def test_to_json_include_computed_false_excludes_underscore_attrs():
     from experiments import Metric

@@ -23,6 +23,9 @@ from scipy.linalg import svd
 from scipy.optimize import minimize
 from sklearn.base import BaseEstimator, RegressorMixin
 
+from importlib.metadata import version                                                                                                                                                                                                                                                       
+__version__ = version('fastridge') 
+
 class RidgeEM(BaseEstimator, RegressorMixin):
     """Bayesian ridge regression via Expectation-Maximization.
 

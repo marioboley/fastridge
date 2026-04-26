@@ -84,23 +84,24 @@ def test_warn_retrieval_returns_str_on_meaningful_variation():
                                                {'value': 0.80, 'run_id': 'y'}]), str)
 
 
-from experiments import (_load_metric_file, _save_json,
-                         _make_run_id, _write_run_file)
+from util import save_json, load_json
+from experiments import _make_run_id
 
 
 
 # tmp_path: pytest built-in fixture providing an isolated temporary directory
 # https://docs.pytest.org/en/stable/how-to/tmp_path.html
 def test_load_metric_file_missing(tmp_path):
-    data = _load_metric_file(str(tmp_path / 'missing.json'))
+    data = load_json(str(tmp_path / 'missing.json'),
+                     default={'computations': [], 'retrievals': []})
     assert data == {'computations': [], 'retrievals': []}
 
 
 def test_save_load_metric_file_roundtrip(tmp_path):
     path = str(tmp_path / 'sub' / 'm.json')
     original = {'computations': [{'value': 0.85, 'run_id': 'abc'}], 'retrievals': []}
-    _save_json(path, original)
-    assert _load_metric_file(path) == original
+    save_json(path, original)
+    assert load_json(path) == original
 
 
 def test_make_run_id_format():
@@ -113,20 +114,6 @@ def test_make_run_id_format():
     assert len(parts[1]) == 6   # HHMMSS
     assert len(parts[2]) == 4   # random suffix
 
-
-# monkeypatch: pytest built-in fixture for temporarily patching module attributes
-# https://docs.pytest.org/en/stable/how-to/monkeypatch.html
-def test_write_run_file(tmp_path, monkeypatch):
-    monkeypatch.setattr(experiments, 'CACHE_DIR', str(tmp_path))
-    run_id = _make_run_id('Experiment')
-    _write_run_file(run_id, {'problems': []},
-                    {'trials_computed': 0, 'trials_retrieved': 0})
-    path = os.path.join(str(tmp_path), 'runs', f'{run_id}.json')
-    assert os.path.exists(path)
-    with open(path) as f:
-        data = json.load(f)
-    assert data['run_id'] == run_id
-    assert 'python' in data['environment']
 
 
 def test_fitting_time_warn_recompute_tolerates_ci_variation():
@@ -212,6 +199,24 @@ def test_new_experiment_run_file_written(tmp_path, monkeypatch):
     monkeypatch.setattr(experiments, 'CACHE_DIR', str(tmp_path))
     _simple_new_exp().run()
     assert len(os.listdir(os.path.join(str(tmp_path), 'runs'))) == 1
+
+
+def test_new_experiment_run_file_content(tmp_path, monkeypatch):
+    monkeypatch.setattr(experiments, 'CACHE_DIR', str(tmp_path))
+    _simple_new_exp().run()
+    runs_dir = os.path.join(str(tmp_path), 'runs')
+    filenames = os.listdir(runs_dir)
+    assert len(filenames) == 1
+    assert filenames[0].startswith('Experiment__')
+    with open(os.path.join(runs_dir, filenames[0])) as f:
+        data = json.load(f)
+    assert data['__class__'] == 'experiments.Experiment'
+    assert data['run_id_'].startswith('Experiment__')
+    assert data['timestamp_start_'] is not None
+    assert data['timestamp_end_'] is not None
+    assert 'python' in data['environment_']
+    assert data['problems'][0]['__class__'] == 'problems.EmpiricalDataProblem'
+    assert data['reps'] == 2
 
 
 def _simple_series_exp(**kwargs):

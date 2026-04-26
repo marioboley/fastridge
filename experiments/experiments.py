@@ -1,8 +1,6 @@
 import time
 import warnings
-import json
 import os
-import tempfile
 import datetime
 import random
 import string
@@ -16,8 +14,15 @@ from sklearn.linear_model import Ridge, LinearRegression
 from sklearn.metrics import mean_squared_error, r2_score
 from fastprogress.fastprogress import progress_bar
 
+from util import to_json, from_json, save_json, load_json, environment
+
 
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'results')
+
+_RUN_FILE_STATE = [
+    'run_id_', 'timestamp_start_', 'timestamp_end_', 'environment_',
+    'problem_keys_', 'estimator_keys_', 'trials_retrieved_', 'trials_computed_'
+]
 
 
 def _cache_key(obj, slug=''):
@@ -39,26 +44,6 @@ def _cache_key(obj, slug=''):
 
 
 
-def _load_metric_file(path):
-    if not os.path.exists(path):
-        return {'computations': [], 'retrievals': []}
-    with open(path) as f:
-        return json.load(f)
-
-
-def _save_json(path, data):
-    """Write data as JSON to path atomically via tempfile + os.replace, creating parent dirs."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path))
-    try:
-        with os.fdopen(fd, 'w') as f:
-            json.dump(data, f)
-        os.replace(tmp, path)
-    except Exception as e:
-        os.unlink(tmp)
-        warnings.warn(f'Cache write failed for {path}: {e}')
-
-
 def _make_run_id(class_name):
     """Return a unique run identifier string of the form ``ClassName__YYYYMMDD-HHMMSS-xxxx``.
 
@@ -69,21 +54,6 @@ def _make_run_id(class_name):
     ts = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
     suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
     return f'{class_name}__{ts}-{suffix}'
-
-
-def _write_run_file(run_id, exp_spec, summary):
-    data = {
-        'run_id': run_id,
-        'timestamp': datetime.datetime.now().isoformat(),
-        'environment': {
-            'python': sys.version.split()[0],
-            'platform': platform.platform(),
-        },
-        'experiment_spec': exp_spec,
-        'summary': summary,
-    }
-    path = os.path.join(CACHE_DIR, 'runs', f'{run_id}.json')
-    _save_json(path, data)
 
 
 class Metric:
@@ -335,16 +305,19 @@ class Experiment:
     def _trial_cache_dir(self, prob_idx, n_idx, est_idx, rep_idx):
         return os.path.join(
             CACHE_DIR, 'trial',
-            _cache_key(self.problems[prob_idx]),
+            self.problem_keys_[prob_idx],
+            # _cache_key(self.problems[prob_idx]),
             str(int(self.ns[prob_idx][n_idx])),
-            _cache_key(self.estimators[est_idx]),
+            # _cache_key(self.estimators[est_idx]),
+            self.estimator_keys_[est_idx],
             str(self.seed + rep_idx),
         )
 
     def _all_stats_in_trial_cache(self, prob_idx, n_idx, est_idx, rep_idx):
         d = self._trial_cache_dir(prob_idx, n_idx, est_idx, rep_idx)
         return all(
-            _load_metric_file(os.path.join(d, str(stat) + '.json'))['computations']
+            load_json(os.path.join(d, str(stat) + '.json'),
+                      default={'computations': [], 'retrievals': []})['computations']
             for stat in self.stats
         )
 
@@ -352,11 +325,11 @@ class Experiment:
         d = self._trial_cache_dir(prob_idx, n_idx, est_idx, rep_idx)
         for stat in self.stats:
             path = os.path.join(d, str(stat) + '.json')
-            data = _load_metric_file(path)
+            data = load_json(path, default={'computations': [], 'retrievals': []})
             mean_val = float(np.mean([c['value'] for c in data['computations']]))
             self.__dict__[str(stat) + '_'][rep_idx, prob_idx, n_idx, est_idx] = mean_val
             data['retrievals'].append({'value': mean_val, 'run_id': self.run_id_})
-            _save_json(path, data)
+            save_json(path, data, indent=None)
             msg = stat.warn_retrieval(data['computations'])
             if msg:
                 warnings.warn(msg)
@@ -383,15 +356,15 @@ class Experiment:
         d = self._trial_cache_dir(prob_idx, n_idx, est_idx, rep_idx)
         for stat in self.stats:
             path = os.path.join(d, str(stat) + '.json')
-            data = _load_metric_file(path)
+            data = load_json(path, default={'computations': [], 'retrievals': []})
             new_val = self.__dict__[str(stat) + '_'][rep_idx, prob_idx, n_idx, est_idx]
             if data['computations']:
                 msg = stat.warn_recompute(
                     [c['value'] for c in data['computations']], new_val)
                 if msg:
                     warnings.warn(msg)
-            data['computations'].append({'value': new_val, 'run_id': self.run_id_})
-            _save_json(path, data)
+            data['computations'].append({'value': to_json(new_val), 'run_id': self.run_id_})
+            save_json(path, data, indent=None)
 
     def run(self, force_recompute=False, ignore_cache=False):
         n_problems = len(self.problems)
@@ -401,7 +374,15 @@ class Experiment:
             self.__dict__[str(stat) + '_'] = np.full(
                 (self.reps, n_problems, n_sizes, n_estimators), np.nan)
         self.run_id_ = _make_run_id(type(self).__name__)
-        trials_computed = trials_retrieved = 0
+        self.timestamp_start_ = datetime.datetime.now().isoformat()
+        self.trials_computed_ = self.trials_retrieved_ = 0
+        self.environment_ = environment()
+        self.estimator_keys_ = [_cache_key(est) for est in self.estimators]
+        self.problem_keys_ = [_cache_key(prob) for prob in self.problems]
+        run_path = os.path.join(CACHE_DIR, 'runs', f'{self.run_id_}.json')
+        if not ignore_cache:
+            save_json(run_path, to_json(self, include_computed=_RUN_FILE_STATE))
+    
         for prob_idx in range(n_problems):
             if self.verbose:
                 print(self.problems[prob_idx].dataset, end=' ')
@@ -412,24 +393,19 @@ class Experiment:
                                 and self._all_stats_in_trial_cache(
                                     prob_idx, n_idx, est_idx, rep_idx)):
                             self._retrieve_trial(prob_idx, n_idx, est_idx, rep_idx)
-                            trials_retrieved += 1
+                            self.trials_retrieved_ += 1
                         else:
                             self._run_trial(prob_idx, n_idx, est_idx, rep_idx)
                             if not ignore_cache:
                                 self._write_trial(prob_idx, n_idx, est_idx, rep_idx)
-                            trials_computed += 1
+                            self.trials_computed_ += 1
                         if self.verbose:
                             print('.', end='', flush=True)
             if self.verbose:
                 print()
+        self.timestamp_end_ = datetime.datetime.now().isoformat()
         if not ignore_cache:
-            _write_run_file(self.run_id_, {
-                'problems': [_cache_key(p) for p in self.problems],
-                'estimators': [_cache_key(e) for e in self.estimators],
-                'ns': self.ns.tolist(),
-                'reps': self.reps,
-                'seed': self.seed,
-            }, {'trials_computed': trials_computed, 'trials_retrieved': trials_retrieved})
+            save_json(run_path, to_json(self, include_computed=_RUN_FILE_STATE))
         return self
 
 
@@ -469,9 +445,11 @@ class ExperimentWithPerSeriesSeeding:
     def _series_cache_dir(self, prob_idx, n_idx, est_idx):
         return os.path.join(
             CACHE_DIR, 'series',
-            _cache_key(self.problems[prob_idx]),
+            # _cache_key(self.problems[prob_idx]),
+            self.problem_keys_[prob_idx],
             str(int(self.ns[prob_idx][n_idx])),
-            _cache_key(self.estimators[est_idx]),
+            # _cache_key(self.estimators[est_idx]),
+            self.estimator_keys_[est_idx],
             str(self.reps),
             str(self.seed),
         )
@@ -479,7 +457,8 @@ class ExperimentWithPerSeriesSeeding:
     def _all_stats_in_series_cache(self, prob_idx, n_idx, est_idx):
         d = self._series_cache_dir(prob_idx, n_idx, est_idx)
         return all(
-            _load_metric_file(os.path.join(d, str(stat) + '.json'))['computations']
+            load_json(os.path.join(d, str(stat) + '.json'),
+                      default={'computations': [], 'retrievals': []})['computations']
             for stat in self.stats
         )
 
@@ -487,13 +466,12 @@ class ExperimentWithPerSeriesSeeding:
         d = self._series_cache_dir(prob_idx, n_idx, est_idx)
         for stat in self.stats:
             path = os.path.join(d, str(stat) + '.json')
-            data = _load_metric_file(path)
+            data = load_json(path, default={'computations': [], 'retrievals': []})
             values = [np.asarray(c['value']) for c in data['computations']]
             mean_val = np.mean(values, axis=0)
             self.__dict__[str(stat) + '_'][:, prob_idx, n_idx, est_idx] = mean_val
-            serialisable = mean_val.tolist() if hasattr(mean_val, 'tolist') else float(mean_val)
-            data['retrievals'].append({'value': serialisable, 'run_id': self.run_id_})
-            _save_json(path, data)
+            data['retrievals'].append({'value': to_json(mean_val), 'run_id': self.run_id_})
+            save_json(path, data, indent=None)
             msg = stat.warn_retrieval(data['computations'])
             if msg:
                 warnings.warn(msg)
@@ -526,15 +504,15 @@ class ExperimentWithPerSeriesSeeding:
         d = self._series_cache_dir(prob_idx, n_idx, est_idx)
         for stat in self.stats:
             path = os.path.join(d, str(stat) + '.json')
-            data = _load_metric_file(path)
+            data = load_json(path, default={'computations': [], 'retrievals': []})
             new_values = self.__dict__[str(stat) + '_'][:, prob_idx, n_idx, est_idx]
             if data['computations']:
                 msg = stat.warn_recompute(
                     [c['value'] for c in data['computations']], new_values)
                 if msg:
                     warnings.warn(msg)
-            data['computations'].append({'value': new_values.tolist(), 'run_id': self.run_id_})
-            _save_json(path, data)
+            data['computations'].append({'value': to_json(new_values), 'run_id': self.run_id_})
+            save_json(path, data, indent=None)
 
     def run(self, force_recompute=False, ignore_cache=False):
         n_problems = len(self.problems)
@@ -544,7 +522,14 @@ class ExperimentWithPerSeriesSeeding:
             self.__dict__[str(stat) + '_'] = np.full(
                 (self.reps, n_problems, n_sizes, n_estimators), np.nan)
         self.run_id_ = _make_run_id(type(self).__name__)
-        trials_computed = trials_retrieved = 0
+        self.environment_ = environment()
+        self.timestamp_start_ = datetime.datetime.now().isoformat()
+        self.trials_computed_ = self.trials_retrieved_ = 0
+        self.estimator_keys_ = [_cache_key(est) for est in self.estimators]
+        self.problem_keys_ = [_cache_key(prob) for prob in self.problems]
+        run_path = os.path.join(CACHE_DIR, 'runs', f'{self.run_id_}.json')
+        if not ignore_cache:
+            save_json(run_path, to_json(self, include_computed=_RUN_FILE_STATE))
         for prob_idx in range(n_problems):
             if self.verbose:
                 print(self.problems[prob_idx].dataset, end=' ')
@@ -553,22 +538,17 @@ class ExperimentWithPerSeriesSeeding:
                     if (not force_recompute and not ignore_cache
                             and self._all_stats_in_series_cache(prob_idx, n_idx, est_idx)):
                         self._retrieve_series(prob_idx, n_idx, est_idx)
-                        trials_retrieved += self.reps
+                        self.trials_retrieved_ += self.reps
                     else:
                         self._run_series(prob_idx, n_idx, est_idx)
                         if not ignore_cache:
                             self._write_series(prob_idx, n_idx, est_idx)
-                        trials_computed += self.reps
+                        self.trials_computed_ += self.reps
             if self.verbose:
                 print()
+        self.timestamp_end_ = datetime.datetime.now().isoformat()
         if not ignore_cache:
-            _write_run_file(self.run_id_, {
-                'problems': [_cache_key(p) for p in self.problems],
-                'estimators': [_cache_key(e) for e in self.estimators],
-                'ns': self.ns.tolist(),
-                'reps': self.reps,
-                'seed': self.seed,
-            }, {'trials_computed': trials_computed, 'trials_retrieved': trials_retrieved})
+            save_json(run_path, to_json(self, include_computed=_RUN_FILE_STATE))
         return self
 
 
