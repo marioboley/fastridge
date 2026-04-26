@@ -153,6 +153,81 @@ def em_max_marginal_posterior_ridge(c, s, n, p, y_sqnorm, epsilon=1e-8, t2=True,
     return sigma_square, tau_square, beta, n_iter
 
 
+def em_max_marginal_posterior_ridge_multi_target(c, s, n, p, y_sqnorm, epsilon=1e-8,
+                                                 t2=True, closed_form_m_step=True,
+                                                 verbose=False, trace=False):
+    """Per-target EM for multi-output ridge regression in SVD-projected space.
+
+    Each target column runs an independent EM via em_max_marginal_posterior_ridge,
+    producing independent sigma_square and tau_square estimates per target.
+
+    Parameters
+    ----------
+    c : ndarray, shape (r, q)
+        Projected observations for each of the q targets.
+    s : ndarray, shape (r,)
+        Singular values.
+    n, p : int
+        Original dataset dimensions.
+    y_sqnorm : ndarray, shape (q,)
+        Per-target squared norms of the preprocessed target vectors.
+    epsilon, t2, closed_form_m_step, verbose : same as em_max_marginal_posterior_ridge.
+    trace : bool
+        If True, additionally return per-target iteration histories (ragged: each
+        target may converge in a different number of iterations).
+
+    Returns
+    -------
+    sigma_arr, tau_arr : ndarray, shape (q,)
+    beta_mat : ndarray, shape (r, q)
+    n_iter_arr : ndarray of int, shape (q,)
+        When trace=True, additionally returns sigma_hist, tau_hist, beta_hist --
+        each a list of length q whose t-th entry is the history for target t.
+
+    Examples
+    --------
+    >>> rng = np.random.default_rng(0)
+    >>> n, p = 500, 3
+    >>> beta1, beta2 = np.array([1., -1., 0.5]), np.array([-0.5, 2., 0.])
+    >>> X = rng.standard_normal((n, p))
+    >>> Y = X @ np.column_stack([beta1, beta2]) + 0.1 * rng.standard_normal((n, 2))
+    >>> Xn = (X - X.mean(0)) / X.std(0)
+    >>> Yn = (Y - Y.mean(0)) / Y.std(0)
+    >>> u, s_sv, vt = svd(Xn, full_matrices=False)
+    >>> c2 = (u.T @ Yn) * s_sv[:, None]
+    >>> sigma_arr, tau_arr, beta_mat, n_iter_arr = em_max_marginal_posterior_ridge_multi_target(
+    ...     c2, s_sv, n, p, (Yn ** 2).sum(0))
+    >>> beta_mat.shape
+    (3, 2)
+    >>> coef0 = vt.T @ beta_mat[:, 0] * Y.std(0)[0] / X.std(0)
+    >>> coef1 = vt.T @ beta_mat[:, 1] * Y.std(0)[1] / X.std(0)
+    >>> np.allclose(coef0, beta1, atol=0.1) and np.allclose(coef1, beta2, atol=0.1)
+    True
+    """
+    q = c.shape[1]
+    r = len(s)
+    sigma_arr = np.empty(q)
+    tau_arr = np.empty(q)
+    beta_mat = np.empty((r, q))
+    n_iter_arr = np.empty(q, dtype=int)
+    if trace:
+        sigma_hist_list, tau_hist_list, beta_hist_list = [], [], []
+    for t in range(q):
+        result = em_max_marginal_posterior_ridge(
+            c[:, t], s, n, p, y_sqnorm[t], epsilon, t2, closed_form_m_step, verbose, trace)
+        if trace:
+            sigma_arr[t], tau_arr[t], beta_mat[:, t], n_iter_arr[t], sh, th, bh = result
+            sigma_hist_list.append(sh)
+            tau_hist_list.append(th)
+            beta_hist_list.append(bh)
+        else:
+            sigma_arr[t], tau_arr[t], beta_mat[:, t], n_iter_arr[t] = result
+    if trace:
+        return (sigma_arr, tau_arr, beta_mat, n_iter_arr,
+                sigma_hist_list, tau_hist_list, beta_hist_list)
+    return sigma_arr, tau_arr, beta_mat, n_iter_arr
+
+
 class RidgeEM(BaseEstimator, RegressorMixin):
     """Bayesian ridge regression via Expectation-Maximization.
 
