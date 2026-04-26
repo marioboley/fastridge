@@ -78,14 +78,18 @@ def test_ridge_em_2d_trace():
 def test_ridge_em_predict_1d():
     X, y, _ = _data()
     est = RidgeEM().fit(X, y)
-    assert est.predict(X).shape == (200,)
+    pred = est.predict(X)
+    assert pred.shape == (200,)
+    np.testing.assert_allclose(pred, X @ est.coef_ + est.intercept_, rtol=1e-10)
 
 
 def test_ridge_em_predict_2d():
     X, y, _ = _data()
     Y = np.column_stack([y, -y])
     est = RidgeEM().fit(X, Y)
-    assert est.predict(X).shape == (200, 2)
+    pred = est.predict(X)
+    assert pred.shape == (200, 2)
+    np.testing.assert_allclose(pred, X @ est.coef_.T + est.intercept_, rtol=1e-10)
 
 
 def test_ridge_loocv_2d_coef_shape():
@@ -116,11 +120,15 @@ def test_ridge_loocv_2d_column_matches_1d():
 def test_ridge_loocv_predict_1d():
     X, y, _ = _data()
     est = RidgeLOOCV().fit(X, y)
-    assert est.predict(X).shape == (200,)
+    pred = est.predict(X)
+    assert pred.shape == (200,)
+    np.testing.assert_allclose(pred, X @ est.coef_ + est.intercept_, rtol=1e-10)
 
 
 def test_ridge_loocv_predict_2d():
     X, y, _ = _data()
     Y = np.column_stack([y, -y])
     est = RidgeLOOCV().fit(X, Y)
-    assert est.predict(X).shape == (200, 2)
+    pred = est.predict(X)
+    assert pred.shape == (200, 2)
+    np.testing.assert_allclose(pred, X @ est.coef_.T + est.intercept_, rtol=1e-10)
