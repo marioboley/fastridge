@@ -26,6 +26,133 @@ from sklearn.base import BaseEstimator, RegressorMixin
 from importlib.metadata import version                                                                                                                                                                                                                                                       
 __version__ = version('fastridge') 
 
+def neg_q_function(theta, w, z, n, p):
+    """Negative Q-function for the numerical M-step in EM for Bayesian ridge.
+
+    Minimized via BFGS when closed_form_m_step=False. theta[0] = tau_square,
+    theta[1] = sigma_square; w and z are E-step sufficient statistics ESN and ESS.
+    """
+    tau_square, sigma_square = theta[0], theta[1]
+    neg_log_prior = np.log(1 + tau_square) + np.log(tau_square) / 2
+    q = ((n + p + 2) / 2 * np.log(sigma_square) + z / (2 * sigma_square)
+         + p * np.log(tau_square) / 2 + w / (2 * sigma_square * tau_square)
+         + neg_log_prior)
+    return -q
+
+
+def em_max_marginal_posterior_ridge(c, s, n, p, y_sqnorm, epsilon=1e-8, t2=True,
+                                    closed_form_m_step=True, verbose=False, trace=False):
+    """Find ridge hyperparameters via EM in SVD-projected space.
+
+    All inputs and outputs are relative to the orthogonalised input; beta is
+    the coefficient vector in that space (not rotated back to feature space).
+
+    Parameters
+    ----------
+    c : ndarray, shape (r,)
+        Projected observations U^T y * s, where r = min(n, p).
+    s : ndarray, shape (r,)
+        Singular values.
+    n, p : int
+        Original dataset dimensions.
+    y_sqnorm : float
+        Squared norm of the (preprocessed) target vector.
+    epsilon : float
+        Convergence threshold on relative RSS change.
+    t2 : bool
+        If True, Beta Prime prior on tau^2; if False, half-Cauchy prior on tau.
+    closed_form_m_step : bool
+        If True, use closed-form M-step; if False, use BFGS via neg_q_function.
+    verbose : bool
+        If True, print (tau_square, sigma_square) at each iteration.
+    trace : bool
+        If True, additionally return per-iteration histories.
+
+    Returns
+    -------
+    sigma_square, tau_square, beta, n_iter
+        Converged hyperparameters and projected coefficient vector.
+        When trace=True, additionally returns sigma_hist, tau_hist, beta_hist
+        (lists including initial state at index 0, then one entry per iteration).
+
+    Examples
+    --------
+    >>> rng = np.random.default_rng(0)
+    >>> n, p = 500, 3
+    >>> beta_true = np.array([1., -1., 0.5])
+    >>> X = rng.standard_normal((n, p))
+    >>> y = X @ beta_true + 0.1 * rng.standard_normal(n)
+    >>> Xn = (X - X.mean(0)) / X.std(0); yn = (y - y.mean()) / y.std()
+    >>> u, s_sv, vt = svd(Xn, full_matrices=False)
+    >>> c = u.T @ yn * s_sv
+    >>> sigma_sq, tau_sq, beta, n_iter = em_max_marginal_posterior_ridge(
+    ...     c, s_sv, n, p, float(yn @ yn))
+    >>> n_iter > 0
+    True
+    >>> coef = vt.T @ beta * y.std() / X.std(0)
+    >>> np.allclose(coef, beta_true, atol=0.1)
+    True
+    >>> out = em_max_marginal_posterior_ridge(c, s_sv, n, p, float(yn @ yn), trace=True)
+    >>> sigma_sq2, tau_sq2, beta2, n_iter2, sh, th, bh = out
+    >>> len(sh) == n_iter2 + 1
+    True
+    >>> np.allclose(bh[-1], beta2)
+    True
+    """
+    tau_square = 1.0
+    sigma_square = y_sqnorm / n
+    RSS = 1e10
+    n_iter = 0
+    beta_init = c / s ** 2
+    if trace:
+        sigma_hist = [sigma_square]
+        tau_hist = [tau_square]
+        beta_hist = [beta_init.copy()]
+
+    while True:
+        RSS_old = RSS
+        beta = c / (s * s + 1.0 / tau_square)
+        ESN = (beta.dot(beta)
+               + sigma_square * ((1.0 / (s * s + 1.0 / tau_square)).sum()
+                                 + tau_square * max(p - n, 0)))
+        RSS = y_sqnorm - 2.0 * beta.dot(c) + (beta * beta).dot(s * s)
+        ESS = RSS + sigma_square * (s * s / (s * s + 1.0 / tau_square)).sum()
+        if closed_form_m_step:
+            if t2:
+                tau_square = ((ESN * (-1 + n) - ESS * (1 + p)
+                               + (4 * ESN * (n + 1) * ESS * (3 + p)
+                                  + (ESN + ESS * (p + 1) - ESN * n) ** 2) ** 0.5)
+                              / (2 * ESS * (3 + p)))
+                sigma_square = (ESS * tau_square + ESN) / ((n + p + 2) * tau_square)
+            else:
+                tau_square = ((ESN * (-1 + n) - ESS * p
+                               + (4 * ESN * (n + 1) * ESS * (2 + p)
+                                  + (ESN + ESS * p - ESN * n) ** 2) ** 0.5)
+                              / (2 * ESS * (2 + p)))
+                sigma_square = (ESS * tau_square + ESN) / ((n + p + 1) * tau_square)
+        else:
+            theta_init = np.array([tau_square, sigma_square])
+            opt_res = minimize(neg_q_function, x0=theta_init,
+                               args=(ESN, ESS, n, p), method='BFGS')
+            tau_square, sigma_square = opt_res.x[0], opt_res.x[1]
+        delta = abs(RSS_old - RSS) / (1.0 + abs(RSS))
+        if verbose:
+            print(tau_square, sigma_square)
+        if trace:
+            beta_t = c / (s * s + 1.0 / tau_square)
+            sigma_hist.append(sigma_square)
+            tau_hist.append(tau_square)
+            beta_hist.append(beta_t)
+        n_iter += 1
+        if delta < epsilon:
+            break
+
+    beta = c / (s * s + 1.0 / tau_square)
+    if trace:
+        return sigma_square, tau_square, beta, n_iter, sigma_hist, tau_hist, beta_hist
+    return sigma_square, tau_square, beta, n_iter
+
+
 class RidgeEM(BaseEstimator, RegressorMixin):
     """Bayesian ridge regression via Expectation-Maximization.
 
