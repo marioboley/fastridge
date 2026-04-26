@@ -21,7 +21,7 @@ import numpy as np
 import time
 from scipy.linalg import svd
 from scipy.optimize import minimize
-from sklearn.base import BaseEstimator, RegressorMixin
+from sklearn.base import BaseEstimator, MultiOutputMixin, RegressorMixin
 
 from importlib.metadata import version                                                                                                                                                                                                                                                       
 __version__ = version('fastridge') 
@@ -228,7 +228,7 @@ def em_max_marginal_posterior_ridge_multi_target(c, s, n, p, y_sqnorm, epsilon=1
     return sigma_arr, tau_arr, beta_mat, n_iter_arr
 
 
-class RidgeEM(BaseEstimator, RegressorMixin):
+class RidgeEM(MultiOutputMixin, BaseEstimator, RegressorMixin):
     """Bayesian ridge regression via Expectation-Maximization.
 
     Examples
@@ -246,107 +246,78 @@ class RidgeEM(BaseEstimator, RegressorMixin):
     0.94
     """
 
-    def __init__(self, epsilon=0.00000001, fit_intercept=True, normalize=True, closed_form_m_step=True, trace=False, verbose=False, t2 = True):
+    def __init__(self, epsilon=0.00000001, fit_intercept=True, normalize=True,
+                 closed_form_m_step=True, trace=False, verbose=False, t2=True,
+                 trace_space='original'):
         self.epsilon = epsilon
         self.fit_intercept = fit_intercept
         self.normalize = normalize
         self.trace = trace
         self.verbose = verbose
         self.closed_form_m_step = closed_form_m_step
-        self.t2 = t2  #parameterization - if t2, tau2 follows beta prime & we maximizing in terms of tau2, else tau follows half Cauchy & we maximize for tau
-
-    @staticmethod
-    def neg_q_function(theta, w, z, n, p):
-        tau_square = theta[0]
-        sigma_square = theta[1]
-        neg_log_prior = np.log(1 + tau_square) + np.log(tau_square)/2
-        q = (n + p + 2)/2 * np.log(sigma_square) + z/(2*sigma_square) + p*np.log(tau_square)/2 + w/(2*sigma_square*tau_square) + neg_log_prior
-        return -q
+        self.t2 = t2
+        self.trace_space = trace_space
 
     def fit(self, x, y):
         n, p = x.shape
 
-        a_x, a_y = (x.mean(axis=0), y.mean()) if self.fit_intercept else (np.zeros(p), 0.0)
-        b_x, b_y = (x.std(axis=0), y.std()) if self.normalize else (np.ones(p), 1.0)
+        a_x = x.mean(axis=0) if self.fit_intercept else np.zeros(p)
+        b_x = x.std(axis=0) if self.normalize else np.ones(p)
+        x = (x - a_x) / b_x
 
-        x = (x - a_x)/b_x
-        y = (y - a_y)/b_y
-        
         svd_start_time = time.time()
         u, s, v_trans = svd(x, full_matrices=False)
-        self.svdTime = time.time() - svd_start_time
-        
-        y_sqnorm = y.dot(y)
-        c = u.T.dot(y) * s
-        beta = c/s**2
-        tau_square = 1
-        sigma_square = y.var()
-        RSS = 1e10
-        self.iterations_ = 0
+        self.svd_time_ = time.time() - svd_start_time
+
+        squeeze = y.ndim == 1
+        y = y[:, None] if squeeze else y
+        q = y.shape[1]
+        a_y = y.mean(axis=0) if self.fit_intercept else np.zeros(q)
+        b_y = y.std(axis=0) if self.normalize else np.ones(q)
+        y_norm = (y - a_y) / b_y
+        y_sqnorm = (y_norm ** 2).sum(axis=0)
+        c = (u.T @ y_norm) * s[:, None]
+
+        result = em_max_marginal_posterior_ridge_multi_target(
+            c, s, n, p, y_sqnorm, self.epsilon, self.t2,
+            self.closed_form_m_step, self.verbose, self.trace)
 
         if self.trace:
-            self.coefs_ = [v_trans.T.dot(beta)]
-            self.sigma_squares_ = [sigma_square]
-            self.tau_squares_ = [tau_square]
-
-        while True:
-            RSS_old = RSS
-            beta_old = beta
-            beta = c / (s*s + 1/tau_square)
-
-            ESN = beta.dot(beta) + sigma_square*((1/(s*s+1/tau_square)).sum()+tau_square*max(p-n, 0))
-            
-            RSS = y_sqnorm - 2*beta.dot(c)+(beta*beta).dot(s*s)
-            ESS = RSS + sigma_square*(s*s/(s*s + 1/tau_square)).sum()
-
-            if self.closed_form_m_step:
-                
-                if self.t2:
-                    
-                    #tau_square = ((((w**2)*(n**2)) + ((z**2)*(p**2)) + 2*w*z*(8 + 4*n + 4*p + n*p))**0.5 + w*n -z*p)/(2*z*(2+p)) ##half cauchy
-                    tau_square = (ESN*(-1+n) - ESS*(1+p) + (4*ESN*(n+1)*ESS*(3+p)+(ESN+ESS*(p+1)-ESN*n)**2)**0.5) / (2*ESS*(3+p))  ##beta prime         
-                    sigma_square = (ESS*tau_square + ESN) / ((n+p+2)*tau_square)
-                    
-                else:
-                    
-                    tau_square = (ESN*(-1+n) - ESS*p + (4*ESN*(n+1)*ESS*(2+p)+(ESN+ESS*p-ESN*n)**2)**0.5) / (2*ESS*(2+p))      
-                    sigma_square = (ESS*tau_square + ESN) / ((n+p+1)*tau_square)
-                    
-                    
+            sigma_arr, tau_arr, beta_mat, n_iter_arr, sh_list, th_list, bh_list = result
+            self.sigma_squares_ = sh_list
+            self.tau_squares_ = th_list
+            if self.trace_space == 'original':
+                coefs_per_target = [
+                    [v_trans.T @ b * b_y[t] / b_x for b in bh_list[t]]
+                    for t in range(q)]
             else:
-                theta_init = np.array([tau_square, sigma_square])
-                opt_res = minimize(self.neg_q_function, x0=theta_init, args=(ESN, ESS, n, p), method='BFGS')
-                theta = opt_res.x
-                tau_square, sigma_square = theta[0], theta[1]
-            
-            #delta = abs(beta_old - beta).sum() / (1 + abs(beta).sum())
-            delta = abs(RSS_old - RSS).sum() / (1 + abs(RSS).sum())
+                coefs_per_target = bh_list
+            self.coefs_ = coefs_per_target
+        else:
+            sigma_arr, tau_arr, beta_mat, n_iter_arr = result
 
-            if self.verbose or self.trace:
-                coef = v_trans.T.dot(beta)
-                if self.verbose:
-                    print(tau_square, sigma_square, coef)
-                if self.trace:
-                    self.coefs_.append(coef)
-                    self.sigma_squares_.append(sigma_square)
-                    self.tau_squares_.append(tau_square)
+        self.coef_ = (v_trans.T @ beta_mat).T * b_y[:, None] / b_x
+        self.intercept_ = a_y - self.coef_ @ a_x
+        self.sigma_square_ = sigma_arr * b_y ** 2
+        self.tau_square_ = tau_arr
+        self.alpha_ = 1.0 / tau_arr
+        self.iterations_ = n_iter_arr
 
-            self.iterations_ += 1
-            if  delta < self.epsilon:
-                break
-
-        beta = c / (s*s + 1/tau_square)
-        beta = v_trans.T.dot(beta)
-        
-        self.coef_ = beta * b_y / b_x
-        self.intercept_ = a_y - self.coef_.dot(a_x)
-        self.sigma_square_ = sigma_square * b_y**2
-        self.tau_square_ = tau_square
-        self.alpha_ = 1/tau_square
+        if squeeze:
+            self.coef_ = self.coef_[0]
+            self.intercept_ = self.intercept_[0]
+            self.sigma_square_ = self.sigma_square_[0]
+            self.tau_square_ = self.tau_square_[0]
+            self.alpha_ = self.alpha_[0]
+            self.iterations_ = int(self.iterations_[0])
+            if self.trace:
+                self.sigma_squares_ = self.sigma_squares_[0]
+                self.tau_squares_ = self.tau_squares_[0]
+                self.coefs_ = self.coefs_[0]
         return self
 
     def predict(self, x):
-        return x.dot(self.coef_) + self.intercept_
+        return x @ self.coef_.T + self.intercept_
 
 
 class RidgeLOOCV(BaseEstimator, RegressorMixin):
