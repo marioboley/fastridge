@@ -10,115 +10,134 @@ single-target path.
 
 ---
 
-## Approach
+## EM Free Functions
 
-Extract the core EM iteration and LOOCV sweep into public free functions that operate on the
-SVD-projected quantities `c` and `s`. The class wrappers `RidgeEM` and `RidgeLOOCV` handle
-preprocessing (centering, normalization, SVD) and dispatch to the appropriate free function based
-on `y.ndim`. This separates numerical kernel from pre/postprocessing, allows Numba JIT compilation
-of the kernels without jitclass limitations, and gives the free functions a clean, testable public
-interface.
+The EM iteration is extracted into two public free functions that operate on SVD-projected
+quantities `c` and `s`. Within these functions all computation is implicitly relative to the
+orthogonalised input, so `beta` unambiguously refers to the coefficient vector in that space.
+The class wrappers handle preprocessing (centering, normalization, SVD) and delegate to these
+functions. This separation allows future Numba JIT compilation of the kernels without jitclass
+limitations and gives the functions a clean, independently testable public interface.
 
----
+There are no analogous free functions for `RidgeLOOCV`: the LOOCV sweep is already a vectorized
+numpy operation with no Numba motivation, and multi-target support is handled inline in the class
+wrapper.
 
-## Free Functions
+### `em_max_marginal_posterior_ridge(c, s, n, p, epsilon=1e-8, t2=True, trace=False)`
 
-### `ridge_em_fit(c, s, n, p, epsilon=1e-8, t2=True)`
-
-Single-target EM kernel. Operates entirely in SVD-projected space.
+Single-target EM kernel. All computation is in the space of the orthogonalised input.
 
 - `c`: 1D array of length `r = min(n, p)` — projected observations (`U^T y * s`)
 - `s`: 1D array of singular values, length `r`
 - `n`, `p`: original dataset dimensions
 - `epsilon`: convergence threshold on relative RSS change
 - `t2`: prior parametrization (Beta Prime on tau^2 if True, half-Cauchy on tau if False)
+- `trace`: if True, additionally returns per-iteration history (see below)
 
-Returns `(tau, sigma, iterations)` as a plain tuple of Python scalars.
+Returns `(sigma_square, tau_square, beta, n_iter)`:
+- `sigma_square`, `tau_square`: converged hyperparameter estimates (Python scalars)
+- `beta`: coefficient vector `c / (s**2 + 1/tau_square)` at convergence (1D array, length `r`)
+- `n_iter`: number of EM iterations (int)
 
-This function is the direct extraction of the current EM body in `RidgeEM.fit`, with no change to
+When `trace=True`, additionally returns `(sigma_hist, tau_hist, beta_hist)` — lists of values at
+each iteration. This path is Python-only. The class wrapper stores `sigma_hist` and `tau_hist`
+directly as `sigma_squares_` and `tau_squares_`, and reconstructs `coefs_` from `beta_hist` by
+rotating each entry back to the original feature space and applying output rescaling.
+
+This function is a direct extraction of the current EM body in `RidgeEM.fit`, with no change to
 the numerical algorithm.
 
-### `ridge_em_fit_multi_target(c, s, n, p, epsilon=1e-8, t2=True)`
+### `em_max_marginal_posterior_ridge_multi_target(c, s, n, p, epsilon=1e-8, t2=True)`
 
-Per-target multi-output variant. Each target column runs an independent EM, producing an
-independent `(tau_t, sigma_t)` pair.
+Per-target multi-output variant. Each target column runs an independent EM, producing independent
+`sigma_square_t` and `tau_square_t` estimates.
 
 - `c`: 2D array of shape `(r, n_targets)`
 - `s`: 1D array of singular values, length `r`
 
-Returns `(tau_arr, sigma_arr, iters_arr)` — 1D arrays of length `n_targets`.
+Returns `(sigma_arr, tau_arr, beta_mat, n_iter_arr)`:
+- `sigma_arr`, `tau_arr`, `n_iter_arr`: 1D arrays of length `n_targets`
+- `beta_mat`: 2D array of shape `(r, n_targets)`
 
-Internally implemented as a loop over targets that calls `ridge_em_fit(c[:, t], ...)` for each
-`t`. This structure:
+Internally a loop over targets calling
+`em_max_marginal_posterior_ridge(c[:, t], s, n, p, epsilon, t2)` for each `t`. This structure
+contains no EM logic of its own (no duplication), adds zero overhead to the 1D path (this
+function is never called for 1D `y`), and is straightforwardly parallelisable with `prange` for
+Numba. Trace is not supported in the multi-target variant.
 
-1. Contains no EM logic of its own (no duplication).
-2. Adds zero overhead to the 1D path (this function is never called for 1D `y`).
-3. Is straightforwardly parallelisable with `prange` for Numba.
-4. Leaves room for a future `ridge_em_fit_joint` (shared tau across targets, pooled M-step
-   statistics) as a separate function with its own algorithm — not a parametric variant of this one.
-
-### `ridge_loocv_sweep(c, s, y_sqnorm, n, alphas)`
-
-Single-target LOOCV kernel, extracted from the current `RidgeLOOCV.fit` loop.
-
-- Returns `loo_mse_` array of length `len(alphas)`.
-
-Multi-target extension: `ridge_loocv_sweep_multi_target(c, s, y_sqnorm, n, alphas)` where `c` is
-`(r, n_targets)` and `y_sqnorm` is `(n_targets,)`. Internally a loop over targets calling
-`ridge_loocv_sweep`. Returns `loo_mse_` of shape `(n_targets, len(alphas))`.
+A future `em_max_marginal_posterior_ridge_joint` (shared tau across targets, pooled M-step
+statistics) is a distinct algorithm and will be a separate function — not a parametric variant of
+this one.
 
 ---
 
-## Class Wrapper: `RidgeEM`
+## Class Wrappers
+
+### `RidgeEM`
 
 Constructor signature is unchanged. The `fit` method:
 
-1. Preprocesses `X` and `y` (center, normalize) — unchanged.
+1. Preprocesses `X` and `y` (center, normalize) — unchanged for 1D `y`. For 2D `y`,
+   `a_y` and `b_y` become 1D arrays of length `n_targets` (per-target mean and std).
 2. Computes thin SVD — unchanged.
-3. Computes `c = U^T y * s` — for 2D `y`, this is `(U^T @ y) * s[:, None]`, giving `(r, n_targets)`.
+3. Computes projected observations `c`:
+   - 1D `y`: `c = U.T @ y * s` (length `r`) — unchanged
+   - 2D `y`: `c = (U.T @ y) * s[:, None]` (shape `(r, n_targets)`)
 4. Dispatches:
-   - `y.ndim == 1` → `ridge_em_fit(c, s, n, p, epsilon, t2)` → scalar `tau`, `sigma`
-   - `y.ndim == 2` → `ridge_em_fit_multi_target(c, s, n, p, epsilon, t2)` → 1D `tau`, `sigma`
-5. Postprocesses into `coef_`, `intercept_`, `sigma_square_`, `tau_square_`, `alpha_`:
-   - 1D `y`: shapes unchanged — `coef_` is `(p,)`, `alpha_` is scalar (backward compatible).
-   - 2D `y`: `coef_` is `(n_targets, p)`, `alpha_` is `(n_targets,)`.
-6. `trace` and `verbose` remain class-level concerns handled in the wrapper (not in free functions).
+   - `y.ndim == 1` → `em_max_marginal_posterior_ridge(c, s, n, p, epsilon, t2, trace=self.trace)`
+   - `y.ndim == 2` → `em_max_marginal_posterior_ridge_multi_target(c, s, n, p, epsilon, t2)`
+5. Postprocesses into fitted attributes:
+   - 1D `y` (unchanged shapes): `coef_` is `(p,)`, `alpha_` is scalar, `sigma_square_` is scalar.
+   - 2D `y`: `coef_` is `(n_targets, p)`, `alpha_` is `(n_targets,)`, `sigma_square_` is
+     `(n_targets,)`.
+6. When `self.trace` is True (1D `y` only):
+   - `sigma_squares_` and `tau_squares_` are taken directly from the returned `sigma_hist` and
+     `tau_hist`.
+   - `coefs_` is reconstructed by rotating each `beta_hist[t]` back to the original feature space
+     (`v_trans.T @ beta_t`) and rescaling (`* b_y / b_x`).
+   - `trace=True` with 2D `y` is not supported; the wrapper raises `ValueError`.
 
-## Class Wrapper: `RidgeLOOCV`
+### `RidgeLOOCV`
 
-Same dispatch pattern. `coef_` shape follows `y.ndim` as above. `alpha_` is scalar for 1D,
-`(n_targets,)` for 2D.
+No free functions. Multi-target support is added inline in `fit`: when `y.ndim == 2`, compute
+`c` as above, then loop over targets to independently select `alpha_t` via LOOCV. Returns
+`coef_` of shape `(n_targets, p)` and `alpha_` of shape `(n_targets,)`. The 1D `y` code path is
+unmodified and incurs zero overhead. Single alpha shared across targets is noted as a future
+extension analogous to joint-tau in EM.
 
 ---
 
 ## Backward Compatibility
 
-- 1D `y` input: all output attribute shapes are identical to current behaviour.
-- 2D `y` input with `n_targets == 1`: `coef_` is `(1, p)`, `alpha_` is `(1,)` — consistent with
-  sklearn's `alpha_per_target=True` convention for `RidgeCV`.
+1D `y` input: all output attribute shapes and values are identical to current behaviour. No
+existing code path is altered.
+
+2D `y` input with `n_targets == 1`: `coef_` is `(1, p)`, `alpha_` is `(1,)` — consistent with
+scikit-learn's `RidgeCV(alpha_per_target=True)` convention.
 
 ---
 
-## Docstrings and Public API
+## Public API
 
-Both free functions are public module-level functions with docstrings stating their contract and a
-doctest. They become part of the `fastridge` package's public interface and are importable directly:
+Both free functions are module-level public functions with docstrings stating their contract and a
+doctest, importable directly:
 
 ```python
-from fastridge import RidgeEM, RidgeLOOCV, ridge_em_fit, ridge_em_fit_multi_target
+from fastridge import (RidgeEM, RidgeLOOCV,
+                       em_max_marginal_posterior_ridge,
+                       em_max_marginal_posterior_ridge_multi_target)
 ```
 
 ---
 
 ## Future Work
 
-- **Joint-tau multi-target**: a separate `ridge_em_fit_joint` function where tau is shared across
-  targets (pooled ESN/ESS in M-step). This is algorithmically distinct and belongs in a new
-  function, not as a flag on `ridge_em_fit_multi_target`.
-- **Numba JIT**: `ridge_em_fit` and `ridge_em_fit_multi_target` are designed to be JIT-compiled.
-  The `trace` and `verbose` paths in the class wrapper cannot be JIT-compiled and are deliberately
-  kept outside the free functions. If iteration history is needed in the future, a `max_iter`
-  parameter with pre-allocated output arrays is the Numba-compatible approach.
-- **Numerical M-step**: the non-closed-form (`closed_form_m_step=False`) path using `scipy.minimize`
-  stays in the class wrapper or a separate non-JIT function — it is not part of the free-function
-  kernel.
+- **Joint-tau multi-target**: `em_max_marginal_posterior_ridge_joint` where tau is shared across
+  targets (pooled ESN/ESS in M-step). Algorithmically distinct from the per-target variant; the
+  class wrapper would dispatch to it via a new parameter (e.g., `shared_tau=False`).
+- **Single alpha for LOOCV multi-target**: analogous to joint-tau; shared alpha selected to
+  minimise combined LOOCV loss across targets.
+- **Numba JIT**: the free functions can be annotated with `@njit`. This requires (a) factoring out
+  or reimplementing the numerical M-step (`scipy.minimize`) in a JIT-compatible form, and (b)
+  introducing a `max_iter` parameter to pre-allocate the trace matrix instead of appending to
+  dynamic lists.
