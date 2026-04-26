@@ -518,13 +518,14 @@ def fit(self, x, y):
     u, s, v_trans = svd(x, full_matrices=False)
     self.svd_time_ = time.time() - svd_start_time
 
-    Y = y[:, None] if y.ndim == 1 else y
-    q = Y.shape[1]
-    a_y = Y.mean(axis=0) if self.fit_intercept else np.zeros(q)
-    b_y = Y.std(axis=0) if self.normalize else np.ones(q)
-    Y_norm = (Y - a_y) / b_y
-    y_sqnorm = (Y_norm ** 2).sum(axis=0)
-    c = (u.T @ Y_norm) * s[:, None]
+    squeeze = y.ndim == 1
+    y = y[:, None] if squeeze else y
+    q = y.shape[1]
+    a_y = y.mean(axis=0) if self.fit_intercept else np.zeros(q)
+    b_y = y.std(axis=0) if self.normalize else np.ones(q)
+    y_norm = (y - a_y) / b_y
+    y_sqnorm = (y_norm ** 2).sum(axis=0)
+    c = (u.T @ y_norm) * s[:, None]
 
     result = em_max_marginal_posterior_ridge_multi_target(
         c, s, n, p, y_sqnorm, self.epsilon, self.t2,
@@ -551,7 +552,7 @@ def fit(self, x, y):
     self.alpha_ = 1.0 / tau_arr
     self.iterations_ = n_iter_arr
 
-    if y.ndim == 1:
+    if squeeze:
         self.coef_ = self.coef_[0]
         self.intercept_ = self.intercept_[0]
         self.sigma_square_ = self.sigma_square_[0]
@@ -696,19 +697,20 @@ def fit(self, x, y):
         z = u * (s ** 2 / (s ** 2 + alpha))
         h_per_alpha.append((z * u).sum(axis=1))
 
-    Y = y[:, None] if y.ndim == 1 else y
-    q = Y.shape[1]
-    a_y = Y.mean(axis=0) if self.fit_intercept else np.zeros(q)
-    b_y = Y.std(axis=0) if self.normalize else np.ones(q)
-    Y_norm = (Y - a_y) / b_y
-    c_mat = (u.T @ Y_norm) * s[:, None]
+    squeeze = y.ndim == 1
+    y = y[:, None] if squeeze else y
+    q = y.shape[1]
+    a_y = y.mean(axis=0) if self.fit_intercept else np.zeros(q)
+    b_y = y.std(axis=0) if self.normalize else np.ones(q)
+    y_norm = (y - a_y) / b_y
+    c_mat = (u.T @ y_norm) * s[:, None]
 
     loo_mse_mat = np.zeros((q, len(self.alphas_)))
     for t in range(q):
         c_t = c_mat[:, t]
         for i, alpha in enumerate(self.alphas_):
             beta_t = c_t / (s ** 2 + alpha)
-            err = Y_norm[:, t] - r.dot(beta_t)
+            err = y_norm[:, t] - r.dot(beta_t)
             loo_mse_mat[t, i] = np.mean((err / (1 - h_per_alpha[i])) ** 2)
 
     i_stars = np.argmin(loo_mse_mat, axis=1)
@@ -723,7 +725,7 @@ def fit(self, x, y):
     self.sigma_square_ = loo_mse_mat[np.arange(q), i_stars] * b_y ** 2
     self.intercept_ = a_y - self.coef_ @ a_x
 
-    if y.ndim == 1:
+    if squeeze:
         self.coef_ = self.coef_[0]
         self.intercept_ = self.intercept_[0]
         self.sigma_square_ = self.sigma_square_[0]
