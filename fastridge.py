@@ -259,6 +259,7 @@ class RidgeEM(MultiOutputMixin, BaseEstimator, RegressorMixin):
         self.trace_space = trace_space
 
     def fit(self, x, y):
+        x, y = np.asarray(x), np.asarray(y)
         n, p = x.shape
 
         a_x = x.mean(axis=0) if self.fit_intercept else np.zeros(p)
@@ -320,7 +321,7 @@ class RidgeEM(MultiOutputMixin, BaseEstimator, RegressorMixin):
         return x @ self.coef_.T + self.intercept_
 
 
-class RidgeLOOCV(BaseEstimator, RegressorMixin):
+class RidgeLOOCV(MultiOutputMixin, BaseEstimator, RegressorMixin):
 
     def __init__(self, alphas=np.logspace(-10, 10, 11, endpoint=True, base=10), fit_intercept=True, normalize=True):
         self.alphas=alphas
@@ -343,13 +344,12 @@ class RidgeLOOCV(BaseEstimator, RegressorMixin):
         return np.logspace(log_min, log_max, l, endpoint=True)
 
     def fit(self, x, y):
+        x, y = np.asarray(x), np.asarray(y)
         n, p = x.shape
 
-        a_x, a_y = (x.mean(axis=0), y.mean()) if self.fit_intercept else (np.zeros(p), 0.0)
-        b_x, b_y = (x.std(axis=0), y.std()) if self.normalize else (np.ones(p), 1.0)
-
-        x = (x - a_x)/b_x
-        y = (y - a_y)/b_y
+        a_x = x.mean(axis=0) if self.fit_intercept else np.zeros(p)
+        b_x = x.std(axis=0) if self.normalize else np.ones(p)
+        x = (x - a_x) / b_x
 
         if np.isscalar(self.alphas):
             alpha_min, alpha_max = self.alpha_range_GMLNET(x, y)
@@ -357,32 +357,50 @@ class RidgeLOOCV(BaseEstimator, RegressorMixin):
         else:
             self.alphas_ = self.alphas
 
+        svd_start_time = time.time()
         u, s, v_trans = svd(x, full_matrices=False)
-        c = u.T.dot(y) * s
-        r = u*s
+        self.svd_time_ = time.time() - svd_start_time
+        r = u * s
 
-        self.loo_mse_ = np.zeros_like(self.alphas_)
-        for i in range(len(self.alphas_)):
-            # hat = u.dot(np.diag(s**2/(s**2 + self.alphas[i]))).dot(u.T)
-            # err = y - hat.dot(y)
-            # loo_mse[i] = np.mean((err / (1 - np.diagonal(hat)))**2)
-            z = u*(s**2/(s**2 + self.alphas_[i]))
-            h = (z*u).sum(axis=1)
-            # print('h', h.shape)
-            beta = c/(s**2 + self.alphas_[i])
-            err = y - r.dot(beta)
-            self.loo_mse_[i] = np.mean((err / (1 - h))**2)
+        h_per_alpha = []
+        for alpha in self.alphas_:
+            z = u * (s ** 2 / (s ** 2 + alpha))
+            h_per_alpha.append((z * u).sum(axis=1))
 
-        i_star = np.argmin(self.loo_mse_)
-        self.alpha_ = self.alphas_[i_star]
+        squeeze = y.ndim == 1
+        y = y[:, None] if squeeze else y
+        q = y.shape[1]
+        a_y = y.mean(axis=0) if self.fit_intercept else np.zeros(q)
+        b_y = y.std(axis=0) if self.normalize else np.ones(q)
+        y_norm = (y - a_y) / b_y
+        c_mat = (u.T @ y_norm) * s[:, None]
 
-        beta = c / (s**2 + self.alpha_)
-        beta = v_trans.T.dot(beta)
-        self.sigma_square_ = self.loo_mse_[i_star] * b_y**2
-        self.coef_ = beta * b_y / b_x
-        self.intercept_ = a_y - self.coef_.dot(a_x)
+        loo_mse_mat = np.zeros((q, len(self.alphas_)))
+        for t in range(q):
+            c_t = c_mat[:, t]
+            for i, alpha in enumerate(self.alphas_):
+                beta_t = c_t / (s ** 2 + alpha)
+                err = y_norm[:, t] - r.dot(beta_t)
+                loo_mse_mat[t, i] = np.mean((err / (1 - h_per_alpha[i])) ** 2)
 
+        i_stars = np.argmin(loo_mse_mat, axis=1)
+        self.alpha_ = self.alphas_[i_stars]
+        self.loo_mse_ = loo_mse_mat
+
+        beta_mat = np.empty((len(s), q))
+        for t in range(q):
+            beta_mat[:, t] = c_mat[:, t] / (s ** 2 + self.alpha_[t])
+
+        self.coef_ = (v_trans.T @ beta_mat).T * b_y[:, None] / b_x
+        self.sigma_square_ = loo_mse_mat[np.arange(q), i_stars] * b_y ** 2
+        self.intercept_ = a_y - self.coef_ @ a_x
+
+        if squeeze:
+            self.coef_ = self.coef_[0]
+            self.intercept_ = self.intercept_[0]
+            self.sigma_square_ = self.sigma_square_[0]
+            self.alpha_ = self.alpha_[0]
         return self
 
     def predict(self, x):
-        return x.dot(self.coef_) + self.intercept_ 
+        return x @ self.coef_.T + self.intercept_
