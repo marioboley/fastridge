@@ -72,13 +72,26 @@ class Metric:
 
 
 class ParameterMeanSquaredError(Metric):
+    """Mean squared error between estimated and true coefficients, averaged over all elements.
+
+    Applicable only to synthetic experiments where prob.beta is defined.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> class _E:
+    ...     coef_ = np.array([[1.0, 2.0], [3.0, 4.0]])
+    >>> class _P:
+    ...     beta = np.array([[1.1, 1.9], [2.9, 4.1]])
+    >>> round(parameter_mean_squared_error(_E(), _P(), None, None), 2)
+    0.01
+    """
 
     @staticmethod
     def __call__(est, prob, x, y):
-        return ((est.coef_ - prob.beta)**2).mean()
+        return float(((est.coef_ - prob.beta)**2).mean())
 
-    @staticmethod
-    def __str__():
+    def __str__(self):
         return 'parameter_mean_squared_errors'
 
     @staticmethod
@@ -87,13 +100,24 @@ class ParameterMeanSquaredError(Metric):
 
 
 class PredictionMeanSquaredError(Metric):
+    """Mean squared error between predictions and test targets, averaged over all elements.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from sklearn.linear_model import Ridge
+    >>> X2 = np.eye(3)
+    >>> Y2 = np.column_stack([np.array([1., 2., 3.]), np.array([3., 2., 1.])])
+    >>> est2 = Ridge(alpha=0.0001).fit(X2, Y2)
+    >>> prediction_mean_squared_error(est2, None, X2, Y2) < 1e-6
+    True
+    """
 
     @staticmethod
     def __call__(est, prob, x, y):
-        return ((est.predict(x) - y)**2).mean()
+        return float(((est.predict(x) - np.asarray(y))**2).mean())
 
-    @staticmethod
-    def __str__():
+    def __str__(self):
         return 'prediction_mean_squared_errors'
 
     @staticmethod
@@ -102,13 +126,22 @@ class PredictionMeanSquaredError(Metric):
 
 
 class RegularizationParameter(Metric):
+    """Mean regularization parameter alpha_ across targets.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> class _E:
+    ...     alpha_ = np.array([1.0, 3.0])
+    >>> regularization_parameter(_E(), None, None, None)
+    2.0
+    """
 
     @staticmethod
     def __call__(est, prob, x, y):
-        return est.alpha_
+        return float(np.mean(est.alpha_))
 
-    @staticmethod
-    def __str__():
+    def __str__(self):
         return 'lambda'
 
     @staticmethod
@@ -117,20 +150,39 @@ class RegularizationParameter(Metric):
 
 
 class NumberOfIterations(Metric):
+    """Total EM steps or total LOO alpha evaluations across all targets.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from fastridge import RidgeEM, RidgeLOOCV
+    >>> from sklearn.linear_model import RidgeCV
+    >>> rng = np.random.default_rng(0)
+    >>> X = rng.standard_normal((20, 3))
+    >>> Y = rng.standard_normal((20, 2))
+    >>> em = RidgeEM().fit(X, Y)
+    >>> number_of_iterations(em, None, None, Y) == int(sum(em.iterations_))
+    True
+    >>> cv = RidgeLOOCV(alphas=10).fit(X, Y)
+    >>> number_of_iterations(cv, None, None, Y)
+    20
+    >>> cv_sk = RidgeCV(alphas=[0.1, 1.0, 10.0]).fit(X, Y[:, 0])
+    >>> number_of_iterations(cv_sk, None, None, Y[:, 0])
+    3
+    """
 
     @staticmethod
     def __call__(est, prob, x, y):
         if hasattr(est, 'iterations_'):
-            return est.iterations_
+            return int(np.sum(est.iterations_))
         elif hasattr(est, 'alphas_'):
-            return len(est.alphas_)
+            return len(est.alphas_) * (y.shape[1] if np.ndim(y) > 1 else 1)
         elif hasattr(est, 'alphas'):
             return len(est.alphas)
         else:
             return float('nan')
 
-    @staticmethod
-    def __str__():
+    def __str__(self):
         return 'number_of_iterations'
 
     @staticmethod
@@ -139,16 +191,29 @@ class NumberOfIterations(Metric):
 
 
 class VarianceAbsoluteError(Metric):
+    """Mean absolute error between estimated and true noise variance, averaged across targets.
+
+    Returns NaN when the estimator has no sigma_square_ attribute.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> class _E:
+    ...     sigma_square_ = np.array([0.25, 0.36])
+    >>> class _P:
+    ...     sigma = 0.5
+    >>> round(variance_abs_error(_E(), _P(), None, None), 3)
+    0.055
+    """
 
     @staticmethod
     def __call__(est, prob, x, y):
         if hasattr(est, 'sigma_square_'):
-            return abs(prob.sigma**2 - est.sigma_square_)
+            return float(np.mean(np.abs(prob.sigma**2 - est.sigma_square_)))
         else:
             return float('nan')
 
-    @staticmethod
-    def __str__():
+    def __str__(self):
         return 'variance_abs_error'
 
     @staticmethod
@@ -183,8 +248,7 @@ class FittingTime(Metric):
     def __call__(est, prob, x, y):
         return est.fitting_time_
 
-    @staticmethod
-    def __str__():
+    def __str__(self):
         return 'fitting_time'
 
     @staticmethod
@@ -193,7 +257,7 @@ class FittingTime(Metric):
 
 
 class PredictionR2(Metric):
-    """Computes R² between predictions and test targets.
+    """R^2 between predictions and test targets; uniform average across targets.
 
     Examples
     --------
@@ -202,16 +266,20 @@ class PredictionR2(Metric):
     >>> X = np.arange(10).reshape(-1, 1).astype(float)
     >>> y = np.arange(10).astype(float)
     >>> est = Ridge(alpha=0.0001).fit(X, y)
-    >>> round(float(prediction_r2(est, None, X, y)), 4)
+    >>> round(prediction_r2(est, None, X, y), 4)
     1.0
+    >>> X3 = np.eye(3)
+    >>> Y3 = np.column_stack([np.array([1., 2., 3.]), np.array([3., 2., 1.])])
+    >>> est3 = Ridge(alpha=0.0001).fit(X3, Y3)
+    >>> prediction_r2(est3, None, X3, Y3) > 0.99
+    True
     """
 
     @staticmethod
     def __call__(est, prob, x, y):
-        return r2_score(y, est.predict(x))
+        return float(r2_score(y, est.predict(x)))
 
-    @staticmethod
-    def __str__():
+    def __str__(self):
         return 'prediction_r2'
 
     @staticmethod
@@ -220,7 +288,7 @@ class PredictionR2(Metric):
 
 
 class NumberOfFeatures(Metric):
-    """Returns the number of features used by the estimator (len of coef_).
+    """Returns the number of features used by the estimator (last dim of coef_.shape).
 
     Examples
     --------
@@ -231,16 +299,20 @@ class NumberOfFeatures(Metric):
     >>> est = Ridge(alpha=0.0001).fit(X, y)
     >>> number_of_features(est, None, X, y)
     1
+    >>> X4 = np.arange(20).reshape(10, 2).astype(float)
+    >>> Y4 = np.column_stack([X4[:, 0], X4[:, 1]])
+    >>> est4 = Ridge(alpha=0.0001).fit(X4, Y4)
+    >>> number_of_features(est4, None, None, None)
+    2
     """
 
     @staticmethod
     def __call__(est, prob, x, y):
         if hasattr(est, 'coef_'):
-            return len(est.coef_)
+            return est.coef_.shape[-1]
         return float('nan')
 
-    @staticmethod
-    def __str__():
+    def __str__(self):
         return 'number_of_features'
 
     @staticmethod
