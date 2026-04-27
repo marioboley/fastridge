@@ -31,6 +31,18 @@ def neg_q_function(theta, w, z, n, p):
 
     Minimized via BFGS when closed_form_m_step=False. theta[0] = tau_square,
     theta[1] = sigma_square; w and z are E-step sufficient statistics ESN and ESS.
+
+    Returns -Q where:
+      Q = (n+p+2)/2 * log(sigma_sq) + z/(2*sigma_sq)
+          + p/2 * log(tau_sq) + w/(2*sigma_sq*tau_sq)
+          + log(1+tau_sq) + log(tau_sq)/2
+
+    Examples
+    --------
+    With tau_sq=sigma_sq=1 all log(tau_sq) and log(sigma_sq) terms vanish;
+    with w=2, z=0, n=0, p=0 only w/(2*sigma_sq*tau_sq)=1 and log(2) remain:
+    >>> np.allclose(neg_q_function(np.array([1.0, 1.0]), 2.0, 0.0, 0, 0), -(1 + np.log(2)))
+    True
     """
     tau_square, sigma_square = theta[0], theta[1]
     neg_log_prior = np.log(1 + tau_square) + np.log(tau_square) / 2
@@ -103,11 +115,11 @@ def em_max_marginal_posterior_ridge(c, s, n, p, y_sqnorm, epsilon=1e-8, t2=True,
     sigma_square = y_sqnorm / n
     RSS = 1e10
     n_iter = 0
-    beta_init = c / s ** 2
+    sigma_hist = tau_hist = beta_hist = None
     if trace:
         sigma_hist = [sigma_square]
         tau_hist = [tau_square]
-        beta_hist = [beta_init.copy()]
+        beta_hist = [c / s ** 2]
 
     while True:
         RSS_old = RSS
@@ -140,9 +152,9 @@ def em_max_marginal_posterior_ridge(c, s, n, p, y_sqnorm, epsilon=1e-8, t2=True,
             print(tau_square, sigma_square)
         if trace:
             beta_t = c / (s * s + 1.0 / tau_square)
-            sigma_hist.append(sigma_square)
-            tau_hist.append(tau_square)
-            beta_hist.append(beta_t)
+            sigma_hist.append(sigma_square)  # type: ignore[union-attr]
+            tau_hist.append(tau_square)  # type: ignore[union-attr]
+            beta_hist.append(beta_t)  # type: ignore[union-attr]
         n_iter += 1
         if delta < epsilon:
             break
@@ -322,6 +334,20 @@ class RidgeEM(MultiOutputMixin, BaseEstimator, RegressorMixin):
 
 
 class RidgeLOOCV(MultiOutputMixin, BaseEstimator, RegressorMixin):
+    """Ridge regression with fast Leave-One-Out Cross-Validation alpha selection.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> rng = np.random.default_rng(0)
+    >>> X = rng.standard_normal((2000, 1))
+    >>> y = 2.0 * X[:, 0] + 0.5 * rng.standard_normal(2000)
+    >>> est = RidgeLOOCV().fit(X, y)
+    >>> round(float(est.coef_[0]), 1)
+    2.0
+    >>> round(est.score(X, y), 2)
+    0.94
+    """
 
     def __init__(self, alphas=np.logspace(-10, 10, 11, endpoint=True, base=10), fit_intercept=True, normalize=True):
         self.alphas=alphas
@@ -400,6 +426,7 @@ class RidgeLOOCV(MultiOutputMixin, BaseEstimator, RegressorMixin):
             self.intercept_ = self.intercept_[0]
             self.sigma_square_ = self.sigma_square_[0]
             self.alpha_ = self.alpha_[0]
+            self.loo_mse_ = self.loo_mse_[0]
         return self
 
     def predict(self, x):
