@@ -11,7 +11,7 @@ from typing import Any
 import numpy as np
 
 
-def to_json(obj, include_computed=False, include_defaults=False):
+def to_json(obj, include_computed: bool | list[str]=False, include_defaults=False):
     """Serialise obj to a JSON-native Python object.
 
     include_computed controls which trailing-underscore attributes are appended
