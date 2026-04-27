@@ -330,7 +330,7 @@ class RidgeEM(MultiOutputMixin, BaseEstimator, RegressorMixin):
         return self
 
     def predict(self, x):
-        return x @ self.coef_.T + self.intercept_
+        return np.asarray(x) @ self.coef_.T + self.intercept_
 
 
 class RidgeLOOCV(MultiOutputMixin, BaseEstimator, RegressorMixin):
@@ -430,4 +430,4 @@ class RidgeLOOCV(MultiOutputMixin, BaseEstimator, RegressorMixin):
         return self
 
     def predict(self, x):
-        return x @ self.coef_.T + self.intercept_
+        return np.asarray(x) @ self.coef_.T + self.intercept_
