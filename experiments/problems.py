@@ -25,8 +25,10 @@ class EmpiricalDataProblem:
     ----------
     dataset : str
         Name of the dataset as registered in data.DATASETS.
-    target : str
-        Name of the target column.
+    target : str or tuple of str
+        Name of the target column, or a tuple of column names for multi-target
+        prediction. When a tuple is supplied, all named columns are excluded
+        from X and get_X_y returns a DataFrame for y.
     drop : tuple of str, optional
         Column names to drop before returning X. Columns absent from the
         dataset are skipped with a warning.
@@ -105,6 +107,13 @@ class EmpiricalDataProblem:
     >>> list(Xte_f.columns) == list(Xtr_f.columns)
     True
 
+    Multi-target usage — y is a DataFrame when target is a tuple:
+
+    >>> student_mt = EmpiricalDataProblem('student', ('G1', 'G2', 'G3'))
+    >>> _, _, y_tr, _ = student_mt.get_X_y(454)
+    >>> y_tr.shape
+    (454, 3)
+
     Value-object identity (eq and hash):
 
     >>> p1 = EmpiricalDataProblem('diabetes', 'target')
@@ -124,7 +133,7 @@ class EmpiricalDataProblem:
     ('bmi',)
     """
     dataset: str
-    target: str
+    target: str | tuple
     drop: tuple = ()
     nan_policy: str = None
     x_transforms: tuple = ()
@@ -139,14 +148,15 @@ class EmpiricalDataProblem:
         if missing:
             warnings.warn(f"Columns not found in '{self.dataset}', skipping drop: {missing}")
         df = df.drop(columns=[c for c in self.drop if c in df.columns])
-        df = df.dropna(subset=[self.target])
+        target_cols = [self.target] if isinstance(self.target, str) else list(self.target)
+        df = df.dropna(subset=target_cols)
         if self.nan_policy == 'drop_rows':
             df = df.dropna()
         elif self.nan_policy == 'drop_cols':
             df = df.dropna(axis=1)
         df = df.reset_index(drop=True)
-        X = df.drop(columns=[self.target])
-        y = df[self.target]
+        X = df.drop(columns=target_cols)
+        y = df[self.target] if isinstance(self.target, str) else df[target_cols]
         for fn in self.y_transforms:
             y = fn(y)
         for fn in self.x_transforms:
