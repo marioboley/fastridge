@@ -236,7 +236,8 @@ def test_experiment_roundtrip(tmp_path):
 
 def test_experiment_with_per_series_seeding_roundtrip(tmp_path):
     from fastridge import RidgeEM, RidgeLOOCV
-    from experiments import ExperimentWithPerSeriesSeeding, prediction_r2
+    from neurips2023 import ExperimentWithPerSeriesSeeding
+    from experiments import prediction_r2
     from problems import EmpiricalDataProblem
     from neurips2023 import NEURIPS2023_TRAIN_SIZES
 

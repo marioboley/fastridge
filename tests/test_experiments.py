@@ -6,10 +6,12 @@ import experiments
 from fastridge import RidgeEM
 from problems import EmpiricalDataProblem, n_train_from_proportion
 from neurips2023 import SyntheticDataExperiment
-from experiments import (EmpiricalDataExperiment, Experiment, ExperimentWithPerSeriesSeeding, Metric,
+import neurips2023
+from experiments import (EmpiricalDataExperiment, Experiment, Metric,
                          parameter_mean_squared_error, prediction_mean_squared_error,
                          regularization_parameter, number_of_iterations, variance_abs_error,
                          fitting_time, prediction_r2, number_of_features)
+from neurips2023 import ExperimentWithPerSeriesSeeding
 
 
 def _simple_exp(**kwargs):
@@ -232,7 +234,7 @@ def test_series_exp_result_shape():
 
 
 def test_series_exp_cache_hit(tmp_path, monkeypatch):
-    monkeypatch.setattr(experiments, 'CACHE_DIR', str(tmp_path))
+    monkeypatch.setattr(neurips2023, 'CACHE_DIR', str(tmp_path))
     exp1 = _simple_series_exp().run()
     with pytest.warns(UserWarning, match='FittingTime'):
         exp2 = _simple_series_exp().run()
@@ -240,7 +242,7 @@ def test_series_exp_cache_hit(tmp_path, monkeypatch):
 
 
 def test_series_exp_ignore_cache(tmp_path, monkeypatch):
-    monkeypatch.setattr(experiments, 'CACHE_DIR', str(tmp_path))
+    monkeypatch.setattr(neurips2023, 'CACHE_DIR', str(tmp_path))
     _simple_series_exp().run(ignore_cache=True)
     assert not os.path.exists(os.path.join(str(tmp_path), 'series'))
 

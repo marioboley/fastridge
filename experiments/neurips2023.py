@@ -1,12 +1,18 @@
+import os
 import time
+import warnings
+import datetime
 import dataclasses
+import shutil
 import numpy as np
 from sklearn.base import clone
 from fastprogress.fastprogress import progress_bar
 from fastridge import RidgeEM, RidgeLOOCV
-from experiments import default_stats
+from experiments import (default_stats, CACHE_DIR, cache_key, make_run_id,
+                          RUN_FILE_STATE, empirical_default_stats)
 from problems import EmpiricalDataProblem, PolynomialExpansion, onehot_non_numeric
 from data import DATASETS
+from util import save_json, load_json, to_json, environment
 
 
 class SyntheticDataExperiment:
@@ -173,3 +179,144 @@ NEURIPS2023_ESTIMATORS = [
 ]
 
 NEURIPS2023_EST_NAMES = ['EM', 'CV_fix', 'CV_glm']
+
+
+class ExperimentWithPerSeriesSeeding:
+    """Run repeated train/test experiments with per-series MT19937 seeding.
+
+    Each (problem, n_train, estimator) combination uses a fresh MT19937 RNG
+    seeded at seed, running reps trials. Results are cached per
+    (problem, n_train, estimator, reps, seed).
+
+    Parameters
+    ----------
+    problems : list of EmpiricalDataProblem
+    estimators : list of estimator objects
+    reps : int
+    ns : array-like of shape (n_problems, n_sizes)
+        A 1-D input is broadcast to all problems.
+    seed : int or None
+    stats : list of Metric or None
+    est_names : list of str or None
+    verbose : bool, default True
+    """
+
+    def __init__(self, problems, estimators, reps, ns,
+                 seed=None, stats=None, est_names=None, verbose=True):
+        self.problems = problems
+        self.estimators = estimators
+        self.reps = reps
+        self.ns = np.atleast_2d(ns)
+        if len(self.ns) != len(self.problems):
+            self.ns = self.ns.repeat(len(self.problems), axis=0)
+        self.seed = seed
+        self.stats = empirical_default_stats if stats is None else stats
+        self.est_names = [str(e) for e in estimators] if est_names is None else est_names
+        self.verbose = verbose
+
+    def _series_cache_dir(self, prob_idx, n_idx, est_idx):
+        return os.path.join(
+            CACHE_DIR, 'series',
+            self.problem_keys_[prob_idx],
+            str(int(self.ns[prob_idx][n_idx])),
+            self.estimator_keys_[est_idx],
+            str(self.reps),
+            str(self.seed),
+        )
+
+    def _all_stats_in_series_cache(self, prob_idx, n_idx, est_idx):
+        d = self._series_cache_dir(prob_idx, n_idx, est_idx)
+        return all(
+            load_json(os.path.join(d, str(stat) + '.json'),
+                      default={'computations': [], 'retrievals': []})['computations']
+            for stat in self.stats
+        )
+
+    def _retrieve_series(self, prob_idx, n_idx, est_idx):
+        d = self._series_cache_dir(prob_idx, n_idx, est_idx)
+        for stat in self.stats:
+            path = os.path.join(d, str(stat) + '.json')
+            data = load_json(path, default={'computations': [], 'retrievals': []})
+            values = [np.asarray(c['value']) for c in data['computations']]
+            mean_val = np.mean(values, axis=0)
+            self.__dict__[str(stat) + '_'][:, prob_idx, n_idx, est_idx] = mean_val
+            data['retrievals'].append({'value': to_json(mean_val), 'run_id': self.run_id_})
+            save_json(path, data, indent=None)
+            msg = stat.warn_retrieval(data['computations'])
+            if msg:
+                warnings.warn(msg)
+        if self.verbose:
+            for _ in range(self.reps):
+                print('.', end='', flush=True)
+
+    def _run_series(self, prob_idx, n_idx, est_idx):
+        problem = self.problems[prob_idx]
+        n_train = int(self.ns[prob_idx][n_idx])
+        rng = np.random.RandomState(self.seed)
+        for rep_idx in range(self.reps):
+            X_train, X_test, y_train, y_test = problem.get_X_y(n_train, rng=rng)
+            _est = clone(self.estimators[est_idx], safe=False)
+            try:
+                t0 = time.time()
+                _est.fit(X_train, y_train)
+                _est.fitting_time_ = time.time() - t0
+            except Exception as e:
+                warnings.warn(f"rep {rep_idx} failed for '{self.est_names[est_idx]}'"
+                              f" on '{problem.dataset}': {e}")
+            else:
+                for stat in self.stats:
+                    val = stat(_est, problem, X_test, y_test)
+                    self.__dict__[str(stat) + '_'][rep_idx, prob_idx, n_idx, est_idx] = val
+            if self.verbose:
+                print('.', end='', flush=True)
+
+    def _write_series(self, prob_idx, n_idx, est_idx):
+        d = self._series_cache_dir(prob_idx, n_idx, est_idx)
+        for stat in self.stats:
+            path = os.path.join(d, str(stat) + '.json')
+            data = load_json(path, default={'computations': [], 'retrievals': []})
+            new_values = self.__dict__[str(stat) + '_'][:, prob_idx, n_idx, est_idx]
+            if data['computations']:
+                msg = stat.warn_recompute(
+                    [c['value'] for c in data['computations']], new_values)
+                if msg:
+                    warnings.warn(msg)
+            data['computations'].append({'value': to_json(new_values), 'run_id': self.run_id_})
+            save_json(path, data, indent=None)
+
+    def run(self, force_recompute=False, ignore_cache=False):
+        n_problems = len(self.problems)
+        n_sizes = len(self.ns[0])
+        n_estimators = len(self.estimators)
+        for stat in self.stats:
+            self.__dict__[str(stat) + '_'] = np.full(
+                (self.reps, n_problems, n_sizes, n_estimators), np.nan)
+        self.run_id_ = make_run_id(type(self).__name__)
+        self.environment_ = environment()
+        self.timestamp_start_ = datetime.datetime.now().isoformat()
+        self.trials_computed_ = self.trials_retrieved_ = 0
+        self.estimator_keys_ = [cache_key(est) for est in self.estimators]
+        self.problem_keys_ = [cache_key(prob) for prob in self.problems]
+        run_path = os.path.join(CACHE_DIR, 'runs', f'{self.run_id_}.json')
+        if not ignore_cache:
+            save_json(run_path, to_json(self, include_computed=RUN_FILE_STATE))
+        for prob_idx in range(n_problems):
+            if self.verbose:
+                print(self.problems[prob_idx].dataset, end=' ')
+            for n_idx in range(n_sizes):
+                for est_idx in range(n_estimators):
+                    if (not force_recompute and not ignore_cache
+                            and self._all_stats_in_series_cache(prob_idx, n_idx, est_idx)):
+                        self._retrieve_series(prob_idx, n_idx, est_idx)
+                        self.trials_retrieved_ += self.reps
+                    else:
+                        self._run_series(prob_idx, n_idx, est_idx)
+                        if not ignore_cache:
+                            self._write_series(prob_idx, n_idx, est_idx)
+                        self.trials_computed_ += self.reps
+            if self.verbose:
+                print()
+        self.timestamp_end_ = datetime.datetime.now().isoformat()
+        if not ignore_cache:
+            save_json(run_path, to_json(self, include_computed=RUN_FILE_STATE))
+        return self
