@@ -324,3 +324,28 @@ class ExperimentWithPerSeriesSeeding:
         if not ignore_cache:
             save_json(run_path, to_json(self, include_computed=RUN_FILE_STATE))
         return self
+
+
+if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser(
+        description='Re-run all NeurIPS 2023 empirical experiments.')
+    parser.add_argument('--force_recompute', action='store_true')
+    parser.add_argument('--ignore_cache',    action='store_true')
+    parser.add_argument('--overwrite_cache', action='store_true')
+    args = parser.parse_args()
+
+    for problems in [NEURIPS2023, NEURIPS2023_D2, NEURIPS2023_D3]:
+        problems_sorted = sorted(problems, key=lambda p: DATASETS[p.dataset]['n'])
+        ExperimentWithPerSeriesSeeding(
+            problems=problems_sorted,
+            estimators=NEURIPS2023_ESTIMATORS,
+            reps=100,
+            ns=[[NEURIPS2023_TRAIN_SIZES[p.dataset]] for p in problems_sorted],
+            seed=123,
+            est_names=NEURIPS2023_EST_NAMES,
+        ).run(
+            force_recompute=args.force_recompute,
+            ignore_cache=args.ignore_cache,
+            overwrite_cache=args.overwrite_cache,
+        )
