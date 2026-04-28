@@ -217,7 +217,8 @@ def test_series_exp_reproducible():
 def test_new_experiment_overwrite_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(experiments, 'CACHE_DIR', str(tmp_path))
     _simple_new_exp().run()
-    _simple_new_exp().run(force_recompute=True)  # accumulates 2 computations
+    with pytest.warns(UserWarning, match='FittingTime'):
+        _simple_new_exp().run(force_recompute=True)  # accumulates 2 computations
     _simple_new_exp().run(overwrite_cache=True)  # deletes per combo, rewrites: back to 1
     trial_dir = os.path.join(str(tmp_path), 'trial')
     json_files = [os.path.join(r, f)
@@ -231,7 +232,8 @@ def test_new_experiment_overwrite_cache(tmp_path, monkeypatch):
 def test_series_exp_overwrite_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(neurips2023, 'CACHE_DIR', str(tmp_path))
     _simple_series_exp().run()
-    _simple_series_exp().run(force_recompute=True)  # accumulates 2 computations
+    with pytest.warns(UserWarning, match='FittingTime'):
+        _simple_series_exp().run(force_recompute=True)  # accumulates 2 computations
     _simple_series_exp().run(overwrite_cache=True)  # deletes per combo, rewrites: back to 1
     series_dir = os.path.join(str(tmp_path), 'series')
     json_files = [os.path.join(r, f)

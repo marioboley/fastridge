@@ -244,7 +244,9 @@ class ExperimentWithPerSeriesSeeding:
             save_json(path, data, indent=None)
             msg = stat.warn_retrieval(data['computations'])
             if msg:
-                warnings.warn(msg)
+                warnings.warn(f"[problem={self.problems[prob_idx].dataset}, "
+                              f"n={int(self.ns[prob_idx][n_idx])}, "
+                              f"est={self.est_names[est_idx]}] {msg}")
         if self.verbose:
             for _ in range(self.reps):
                 print('.', end='', flush=True)
@@ -280,7 +282,10 @@ class ExperimentWithPerSeriesSeeding:
                 msg = stat.warn_recompute(
                     [c['value'] for c in data['computations']], new_values)
                 if msg:
-                    warnings.warn(msg)
+                    warnings.warn(
+                        f"[problem={self.problems[prob_idx].dataset}, "
+                        f"n={int(self.ns[prob_idx][n_idx])}, "
+                        f"est={self.est_names[est_idx]}] {msg}")
             data['computations'].append({'value': to_json(new_values), 'run_id': self.run_id_})
             save_json(path, data, indent=None)
 

@@ -18,6 +18,10 @@ from fastprogress.fastprogress import progress_bar
 from util import to_json, from_json, save_json, load_json, environment
 
 
+warnings.formatwarning = lambda message, category, filename, lineno, line=None: (
+    f'{category.__name__}: {message}\n'
+)
+
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'results')
 
 RUN_FILE_STATE = [
@@ -405,7 +409,9 @@ class Experiment:
             save_json(path, data, indent=None)
             msg = stat.warn_retrieval(data['computations'])
             if msg:
-                warnings.warn(msg)
+                warnings.warn(f"[problem={self.problems[prob_idx].dataset}, "
+                              f"n={int(self.ns[prob_idx][n_idx])}, "
+                              f"est={self.est_names[est_idx]}, rep={rep_idx}] {msg}")
 
     def _run_trial(self, prob_idx, n_idx, est_idx, rep_idx):
         problem = self.problems[prob_idx]
@@ -435,7 +441,9 @@ class Experiment:
                 msg = stat.warn_recompute(
                     [c['value'] for c in data['computations']], new_val)
                 if msg:
-                    warnings.warn(msg)
+                    warnings.warn(f"[problem={self.problems[prob_idx].dataset}, "
+                                  f"n={int(self.ns[prob_idx][n_idx])}, "
+                                  f"est={self.est_names[est_idx]}, rep={rep_idx}] {msg}")
             data['computations'].append({'value': to_json(new_val), 'run_id': self.run_id_})
             save_json(path, data, indent=None)
 

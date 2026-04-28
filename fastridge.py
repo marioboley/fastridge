@@ -274,22 +274,24 @@ class RidgeEM(MultiOutputMixin, BaseEstimator, RegressorMixin):
         x, y = np.asarray(x), np.asarray(y)
         n, p = x.shape
 
+        squeeze = y.ndim == 1
+        y = y[:, None] if squeeze else y
+        q = y.shape[1]
+
         a_x = x.mean(axis=0) if self.fit_intercept else np.zeros(p)
         b_x = x.std(axis=0) if self.normalize else np.ones(p)
         x = (x - a_x) / b_x
+
+        a_y = y.mean(axis=0) if self.fit_intercept else np.zeros(q)
+        b_y = y.std(axis=0) if self.normalize else np.ones(q)
+        y = (y - a_y) / b_y
 
         svd_start_time = time.time()
         u, s, v_trans = svd(x, full_matrices=False)
         self.svd_time_ = time.time() - svd_start_time
 
-        squeeze = y.ndim == 1
-        y = y[:, None] if squeeze else y
-        q = y.shape[1]
-        a_y = y.mean(axis=0) if self.fit_intercept else np.zeros(q)
-        b_y = y.std(axis=0) if self.normalize else np.ones(q)
-        y_norm = (y - a_y) / b_y
-        y_sqnorm = (y_norm ** 2).sum(axis=0)
-        c = (u.T @ y_norm) * s[:, None]
+        y_sqnorm = (y ** 2).sum(axis=0)
+        c = (u.T @ y) * s[:, None]
 
         result = em_max_marginal_posterior_ridge_multi_target(
             c, s, n, p, y_sqnorm, self.epsilon, self.t2,
@@ -373,9 +375,17 @@ class RidgeLOOCV(MultiOutputMixin, BaseEstimator, RegressorMixin):
         x, y = np.asarray(x), np.asarray(y)
         n, p = x.shape
 
+        squeeze = y.ndim == 1
+        y = y[:, None] if squeeze else y
+        q = y.shape[1]
+
         a_x = x.mean(axis=0) if self.fit_intercept else np.zeros(p)
         b_x = x.std(axis=0) if self.normalize else np.ones(p)
         x = (x - a_x) / b_x
+
+        a_y = y.mean(axis=0) if self.fit_intercept else np.zeros(q)
+        b_y = y.std(axis=0) if self.normalize else np.ones(q)
+        y = (y - a_y) / b_y
 
         if np.isscalar(self.alphas):
             alpha_min, alpha_max = self.alpha_range_GMLNET(x, y)
@@ -393,20 +403,14 @@ class RidgeLOOCV(MultiOutputMixin, BaseEstimator, RegressorMixin):
             z = u * (s ** 2 / (s ** 2 + alpha))
             h_per_alpha.append((z * u).sum(axis=1))
 
-        squeeze = y.ndim == 1
-        y = y[:, None] if squeeze else y
-        q = y.shape[1]
-        a_y = y.mean(axis=0) if self.fit_intercept else np.zeros(q)
-        b_y = y.std(axis=0) if self.normalize else np.ones(q)
-        y_norm = (y - a_y) / b_y
-        c_mat = (u.T @ y_norm) * s[:, None]
+        c_mat = (u.T @ y) * s[:, None]
 
         loo_mse_mat = np.zeros((q, len(self.alphas_)))
         for t in range(q):
             c_t = c_mat[:, t]
             for i, alpha in enumerate(self.alphas_):
                 beta_t = c_t / (s ** 2 + alpha)
-                err = y_norm[:, t] - r.dot(beta_t)
+                err = y[:, t] - r.dot(beta_t)
                 loo_mse_mat[t, i] = np.mean((err / (1 - h_per_alpha[i])) ** 2)
 
         i_stars = np.argmin(loo_mse_mat, axis=1)
