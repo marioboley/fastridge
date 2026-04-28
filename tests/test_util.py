@@ -237,7 +237,8 @@ def test_experiment_roundtrip(tmp_path):
 def test_experiment_with_per_series_seeding_roundtrip(tmp_path):
     from fastridge import RidgeEM, RidgeLOOCV
     from experiments import ExperimentWithPerSeriesSeeding, prediction_r2
-    from problems import EmpiricalDataProblem, NEURIPS2023_TRAIN_SIZES
+    from problems import EmpiricalDataProblem
+    from neurips2023 import NEURIPS2023_TRAIN_SIZES
 
     problems = [EmpiricalDataProblem('diabetes', 'target', zero_variance_filter=True)]
     estimators = [RidgeEM(t2=False), RidgeLOOCV(alphas=np.logspace(-10, 10, 11, base=10))]

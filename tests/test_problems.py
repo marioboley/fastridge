@@ -19,7 +19,8 @@ def test_one_hot_encode_accepts_rng():
     assert result.equals(X)
 
 
-from problems import EmpiricalDataProblem, PolynomialExpansion, NEURIPS2023, NEURIPS2023_D2, NEURIPS2023_D3
+from problems import EmpiricalDataProblem, PolynomialExpansion
+from neurips2023 import NEURIPS2023, NEURIPS2023_D2, NEURIPS2023_D3
 
 
 def test_zero_variance_filter_default_false():
