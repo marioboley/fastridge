@@ -1,5 +1,11 @@
 # Known Issues with NeurIPS 2023 Experiments
 
+## Empirical Regression Problems
+
+### Facebook
+
+The prediction problem uses variable `Total Interactions` as target, defined as sum of variables `comment`, `like`, `share`, without dropping those variables. As a result, not only is the multi-target nature of the problem not reflected, but also a severe information leakage is introduced that renders the problem trivial.
+
 ## Polynomial Feature Subsampling
 
 ### Intent
