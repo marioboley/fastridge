@@ -377,16 +377,16 @@ def random_problem(p, r=None, sigma_beta=1.0, sigma_eps=0.5, rng=None):
     return linear_problem(beta, sigma_eps, x_dist)
 
 
-_OHE = (OneHotEncodeCategories(),)
+onehot_non_numeric = (OneHotEncodeCategories(),)
 
 NEURIPS2023 = frozenset({
     EmpiricalDataProblem('abalone',          'Rings',
-                         x_transforms=_OHE, zero_variance_filter=True),
+                         x_transforms=onehot_non_numeric, zero_variance_filter=True),
     EmpiricalDataProblem('airfoil',          'scaled-sound-pressure',
                          zero_variance_filter=True),
     EmpiricalDataProblem('automobile',       'price',
                          nan_policy='drop_rows',
-                         x_transforms=_OHE,
+                         x_transforms=onehot_non_numeric,
                          y_transforms=(np.log,),
                          zero_variance_filter=True),
     EmpiricalDataProblem('autompg',          'mpg',
@@ -411,10 +411,10 @@ NEURIPS2023 = frozenset({
     EmpiricalDataProblem('facebook',         'Total Interactions',
                          drop=('comment', 'like', 'share'),
                          nan_policy='drop_rows',
-                         x_transforms=_OHE,
+                         x_transforms=onehot_non_numeric,
                          zero_variance_filter=True),
     EmpiricalDataProblem('forest',           'area',
-                         x_transforms=_OHE,
+                         x_transforms=onehot_non_numeric,
                          y_transforms=(np.log1p,),
                          zero_variance_filter=True),
     EmpiricalDataProblem('naval_propulsion', 'GT_compressor_decay',
@@ -435,7 +435,7 @@ NEURIPS2023 = frozenset({
                          zero_variance_filter=True),
     EmpiricalDataProblem('student',          'G3',
                          drop=('G1', 'G2'),
-                         x_transforms=_OHE,
+                         x_transforms=onehot_non_numeric,
                          zero_variance_filter=True),
     EmpiricalDataProblem('tomshw',           'V97',
                          zero_variance_filter=True),
