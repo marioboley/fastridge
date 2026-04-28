@@ -284,7 +284,7 @@ class ExperimentWithPerSeriesSeeding:
             data['computations'].append({'value': to_json(new_values), 'run_id': self.run_id_})
             save_json(path, data, indent=None)
 
-    def run(self, force_recompute=False, ignore_cache=False):
+    def run(self, force_recompute=False, ignore_cache=False, overwrite_cache=False):
         n_problems = len(self.problems)
         n_sizes = len(self.ns[0])
         n_estimators = len(self.estimators)
@@ -305,11 +305,15 @@ class ExperimentWithPerSeriesSeeding:
                 print(self.problems[prob_idx].dataset, end=' ')
             for n_idx in range(n_sizes):
                 for est_idx in range(n_estimators):
-                    if (not force_recompute and not ignore_cache
+                    if (not force_recompute and not overwrite_cache and not ignore_cache
                             and self._all_stats_in_series_cache(prob_idx, n_idx, est_idx)):
                         self._retrieve_series(prob_idx, n_idx, est_idx)
                         self.trials_retrieved_ += self.reps
                     else:
+                        if overwrite_cache and not ignore_cache:
+                            shutil.rmtree(
+                                self._series_cache_dir(prob_idx, n_idx, est_idx),
+                                ignore_errors=True)
                         self._run_series(prob_idx, n_idx, est_idx)
                         if not ignore_cache:
                             self._write_series(prob_idx, n_idx, est_idx)

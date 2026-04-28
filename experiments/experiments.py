@@ -1,6 +1,7 @@
 import time
 import warnings
 import os
+import shutil
 import datetime
 import random
 import string
@@ -438,7 +439,7 @@ class Experiment:
             data['computations'].append({'value': to_json(new_val), 'run_id': self.run_id_})
             save_json(path, data, indent=None)
 
-    def run(self, force_recompute=False, ignore_cache=False):
+    def run(self, force_recompute=False, ignore_cache=False, overwrite_cache=False):
         n_problems = len(self.problems)
         n_sizes = len(self.ns[0])
         n_estimators = len(self.estimators)
@@ -454,19 +455,23 @@ class Experiment:
         run_path = os.path.join(CACHE_DIR, 'runs', f'{self.run_id_}.json')
         if not ignore_cache:
             save_json(run_path, to_json(self, include_computed=RUN_FILE_STATE))
-    
+
         for prob_idx in range(n_problems):
             if self.verbose:
                 print(self.problems[prob_idx].dataset, end=' ')
             for n_idx in range(n_sizes):
                 for est_idx in range(n_estimators):
                     for rep_idx in range(self.reps):
-                        if (not force_recompute and not ignore_cache
+                        if (not force_recompute and not overwrite_cache and not ignore_cache
                                 and self._all_stats_in_trial_cache(
                                     prob_idx, n_idx, est_idx, rep_idx)):
                             self._retrieve_trial(prob_idx, n_idx, est_idx, rep_idx)
                             self.trials_retrieved_ += 1
                         else:
+                            if overwrite_cache and not ignore_cache:
+                                shutil.rmtree(
+                                    self._trial_cache_dir(prob_idx, n_idx, est_idx, rep_idx),
+                                    ignore_errors=True)
                             self._run_trial(prob_idx, n_idx, est_idx, rep_idx)
                             if not ignore_cache:
                                 self._write_trial(prob_idx, n_idx, est_idx, rep_idx)
