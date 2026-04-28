@@ -1,3 +1,4 @@
+import contextlib
 import json
 import os
 import tempfile
@@ -9,6 +10,35 @@ import platform
 from typing import Any
 
 import numpy as np
+
+_default_showwarning = warnings.showwarning
+
+
+@contextlib.contextmanager
+def route_warnings_to(write_fn):
+    """Route warnings.warn output through write_fn for the duration of the block.
+
+    Restores the original handler on exit, including on KeyboardInterrupt.
+    If a non-default showwarning is already installed (e.g. pytest's capture
+    handler), it is called after write_fn so both sinks receive the warning.
+
+    >>> import warnings
+    >>> received = []
+    >>> with route_warnings_to(received.append):
+    ...     warnings.warn('test', UserWarning)
+    >>> received[0]
+    'UserWarning: test'
+    """
+    orig = warnings.showwarning
+    def _show(msg, cat, fn, ln, file=None, line=None):
+        write_fn(f'{cat.__name__}: {msg}')
+        if orig is not _default_showwarning:
+            orig(msg, cat, fn, ln, file=file, line=line)
+    warnings.showwarning = _show
+    try:
+        yield
+    finally:
+        warnings.showwarning = orig
 
 
 def to_json(obj, include_computed: bool | list[str]=False, include_defaults=False):

@@ -1,9 +1,10 @@
+import contextlib
 import json
 import os
 import warnings
 import numpy as np
 import pytest
-from util import to_json, from_json, save_json, load_json
+from util import to_json, from_json, save_json, load_json, route_warnings_to, _default_showwarning
 
 
 # ── save_json / load_json ────────────────────────────────────────────────────
@@ -253,3 +254,42 @@ def test_experiment_with_per_series_seeding_roundtrip(tmp_path):
     save_json(path, to_json(exp))
     reconstructed = load_json(path)
     assert to_json(reconstructed) == to_json(exp)
+
+
+# ── route_warnings_to ────────────────────────────────────────────────────────
+
+def test_route_warnings_to_redirects():
+    received = []
+    with route_warnings_to(received.append):
+        warnings.warn('hello', UserWarning)
+    assert received == ['UserWarning: hello']
+
+
+def test_route_warnings_to_restores_on_exit():
+    orig = warnings.showwarning
+    with route_warnings_to(lambda s: None):
+        pass
+    assert warnings.showwarning is orig
+
+
+def test_route_warnings_to_restores_on_exception():
+    orig = warnings.showwarning
+    with contextlib.suppress(ValueError):
+        with route_warnings_to(lambda s: None):
+            raise ValueError
+    assert warnings.showwarning is orig
+
+
+def test_route_warnings_to_chains_non_default():
+    chained = []
+    sentinel = lambda msg, cat, fn, ln, file=None, line=None: chained.append(str(msg))
+    orig_default = warnings.showwarning
+    warnings.showwarning = sentinel
+    try:
+        received = []
+        with route_warnings_to(received.append):
+            warnings.warn('hi', UserWarning)
+        assert received == ['UserWarning: hi']
+        assert chained == ['hi']
+    finally:
+        warnings.showwarning = orig_default
