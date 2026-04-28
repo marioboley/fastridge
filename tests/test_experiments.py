@@ -7,51 +7,18 @@ from fastridge import RidgeEM
 from problems import EmpiricalDataProblem, n_train_from_proportion
 from neurips2023 import SyntheticDataExperiment
 import neurips2023
-from experiments import (EmpiricalDataExperiment, Experiment, Metric,
+from experiments import (Experiment, Metric,
                          parameter_mean_squared_error, prediction_mean_squared_error,
                          regularization_parameter, number_of_iterations, variance_abs_error,
                          fitting_time, prediction_r2, number_of_features)
 from neurips2023 import ExperimentWithPerSeriesSeeding
 
 
-def _simple_exp(**kwargs):
-    prob = EmpiricalDataProblem('diabetes', 'target', zero_variance_filter=True)
-    ns = n_train_from_proportion([prob])
-    defaults = dict(seed=1, generator='MT19937', verbose=False)
-    defaults.update(kwargs)
-    return EmpiricalDataExperiment([prob], [RidgeEM()], reps=2, ns=ns, **defaults)
-
-
-def test_result_shape():
-    assert _simple_exp().run().prediction_r2_.shape == (2, 1, 1, 1)
-
-
 def test_ns_shape():
-    exp = _simple_exp()
+    prob = EmpiricalDataProblem('diabetes', 'target', zero_variance_filter=True)
+    exp = Experiment([prob], [RidgeEM()], reps=2, ns=n_train_from_proportion([prob]))
     assert exp.ns.shape == (1, 1)
-    assert int(exp.ns[0, 0]) == 309  # 442 * 0.7
-
-
-def test_make_rng_fixed_progression_same_seed():
-    exp = _simple_exp(seed_progression='fixed')
-    r0 = exp._make_rng(unit_idx=0)
-    r5 = exp._make_rng(unit_idx=5)
-    assert r0.randint(10000) == r5.randint(10000)
-
-
-def test_make_rng_sequential_progression_different_seeds():
-    exp = _simple_exp(seed_progression='sequential')
-    r0 = exp._make_rng(unit_idx=0)
-    r1 = exp._make_rng(unit_idx=1)
-    assert r0.randint(10000) != r1.randint(10000)
-
-
-def test_series_scope_reproducible():
-    exp1 = _simple_exp()
-    exp2 = _simple_exp()
-    exp1.run()
-    exp2.run()
-    np.testing.assert_array_equal(exp1.prediction_r2_, exp2.prediction_r2_)
+    assert int(exp.ns[0, 0]) == 309
 
 
 def test_stat_instances_are_metric():
@@ -140,12 +107,6 @@ def test_fitting_time_warn_retrieval_narrow_ci():
 def test_fitting_time_warn_retrieval_wide_ci():
     comps = [{'value': v, 'run_id': 'x'} for v in [0.1, 10.0, 0.1]]
     assert fitting_time.warn_retrieval(comps) is not None
-
-
-def test_pcg64_and_mt19937_differ():
-    exp_mt = _simple_exp(generator='MT19937').run()
-    exp_pc = _simple_exp(generator='PCG64').run()
-    assert not np.array_equal(exp_mt.prediction_r2_, exp_pc.prediction_r2_)
 
 
 def test_synthetic_experiment_importable():
@@ -247,18 +208,7 @@ def test_series_exp_ignore_cache(tmp_path, monkeypatch):
     assert not os.path.exists(os.path.join(str(tmp_path), 'series'))
 
 
-def test_series_exp_numerical_equivalence():
-    # ExperimentWithPerSeriesSeeding must reproduce EmpiricalDataExperiment
-    # with generator='MT19937', seed_scope='series', seed_progression='fixed' exactly.
-    prob = EmpiricalDataProblem('diabetes', 'target', zero_variance_filter=True)
-    ns = n_train_from_proportion([prob])
-    legacy = EmpiricalDataExperiment(
-        [prob], [RidgeEM()], reps=2, ns=ns,
-        seed=1, generator='MT19937', seed_scope='series',
-        seed_progression='fixed', verbose=False)
-    new = ExperimentWithPerSeriesSeeding(
-        [prob], [RidgeEM()], reps=2, ns=ns,
-        seed=1, verbose=False)
-    legacy.run()
-    new.run(ignore_cache=True)
-    np.testing.assert_array_equal(legacy.prediction_r2_, new.prediction_r2_)
+def test_series_exp_reproducible():
+    exp1 = _simple_series_exp().run(ignore_cache=True)
+    exp2 = _simple_series_exp().run(ignore_cache=True)
+    np.testing.assert_array_equal(exp1.prediction_r2_, exp2.prediction_r2_)
