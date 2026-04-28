@@ -85,7 +85,7 @@ def test_warn_retrieval_returns_str_on_meaningful_variation():
 
 
 from util import save_json, load_json
-from experiments import _make_run_id
+from experiments import make_run_id
 
 
 
@@ -104,8 +104,8 @@ def test_save_load_metric_file_roundtrip(tmp_path):
     assert load_json(path) == original
 
 
-def test_make_run_id_format():
-    run_id = _make_run_id('Experiment')
+def testmake_run_id_format():
+    run_id = make_run_id('Experiment')
     assert run_id.startswith('Experiment__')
     tail = run_id[len('Experiment__'):]
     parts = tail.split('-')

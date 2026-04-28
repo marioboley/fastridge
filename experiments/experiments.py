@@ -19,13 +19,13 @@ from util import to_json, from_json, save_json, load_json, environment
 
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'results')
 
-_RUN_FILE_STATE = [
+RUN_FILE_STATE = [
     'run_id_', 'timestamp_start_', 'timestamp_end_', 'environment_',
     'problem_keys_', 'estimator_keys_', 'trials_retrieved_', 'trials_computed_'
 ]
 
 
-def _cache_key(obj, slug=''):
+def cache_key(obj, slug=''):
     """Return a filesystem-safe cache key for obj.
 
     The key is ``ClassName[_slug]__<joblib_hash>``. The optional slug is
@@ -33,9 +33,9 @@ def _cache_key(obj, slug=''):
     directories human-browsable; callers are responsible for supplying a
     meaningful, filesystem-safe value (e.g. a dataset name).
 
-    >>> _cache_key(object(), slug='')[:len('object__')]
+    >>> cache_key(object(), slug='')[:len('object__')]
     'object__'
-    >>> key = _cache_key(object(), slug='iris')
+    >>> key = cache_key(object(), slug='iris')
     >>> key.startswith('object_iris__')
     True
     """
@@ -44,7 +44,7 @@ def _cache_key(obj, slug=''):
 
 
 
-def _make_run_id(class_name):
+def make_run_id(class_name):
     """Return a unique run identifier string of the form ``ClassName__YYYYMMDD-HHMMSS-xxxx``.
 
     The timestamp component is the current local time; the four-character
@@ -378,9 +378,9 @@ class Experiment:
         return os.path.join(
             CACHE_DIR, 'trial',
             self.problem_keys_[prob_idx],
-            # _cache_key(self.problems[prob_idx]),
+            # cache_key(self.problems[prob_idx]),
             str(int(self.ns[prob_idx][n_idx])),
-            # _cache_key(self.estimators[est_idx]),
+            # cache_key(self.estimators[est_idx]),
             self.estimator_keys_[est_idx],
             str(self.seed + rep_idx),
         )
@@ -445,15 +445,15 @@ class Experiment:
         for stat in self.stats:
             self.__dict__[str(stat) + '_'] = np.full(
                 (self.reps, n_problems, n_sizes, n_estimators), np.nan)
-        self.run_id_ = _make_run_id(type(self).__name__)
+        self.run_id_ = make_run_id(type(self).__name__)
         self.timestamp_start_ = datetime.datetime.now().isoformat()
         self.trials_computed_ = self.trials_retrieved_ = 0
         self.environment_ = environment()
-        self.estimator_keys_ = [_cache_key(est) for est in self.estimators]
-        self.problem_keys_ = [_cache_key(prob) for prob in self.problems]
+        self.estimator_keys_ = [cache_key(est) for est in self.estimators]
+        self.problem_keys_ = [cache_key(prob) for prob in self.problems]
         run_path = os.path.join(CACHE_DIR, 'runs', f'{self.run_id_}.json')
         if not ignore_cache:
-            save_json(run_path, to_json(self, include_computed=_RUN_FILE_STATE))
+            save_json(run_path, to_json(self, include_computed=RUN_FILE_STATE))
     
         for prob_idx in range(n_problems):
             if self.verbose:
@@ -477,7 +477,7 @@ class Experiment:
                 print()
         self.timestamp_end_ = datetime.datetime.now().isoformat()
         if not ignore_cache:
-            save_json(run_path, to_json(self, include_computed=_RUN_FILE_STATE))
+            save_json(run_path, to_json(self, include_computed=RUN_FILE_STATE))
         return self
 
 
@@ -517,10 +517,10 @@ class ExperimentWithPerSeriesSeeding:
     def _series_cache_dir(self, prob_idx, n_idx, est_idx):
         return os.path.join(
             CACHE_DIR, 'series',
-            # _cache_key(self.problems[prob_idx]),
+            # cache_key(self.problems[prob_idx]),
             self.problem_keys_[prob_idx],
             str(int(self.ns[prob_idx][n_idx])),
-            # _cache_key(self.estimators[est_idx]),
+            # cache_key(self.estimators[est_idx]),
             self.estimator_keys_[est_idx],
             str(self.reps),
             str(self.seed),
@@ -593,15 +593,15 @@ class ExperimentWithPerSeriesSeeding:
         for stat in self.stats:
             self.__dict__[str(stat) + '_'] = np.full(
                 (self.reps, n_problems, n_sizes, n_estimators), np.nan)
-        self.run_id_ = _make_run_id(type(self).__name__)
+        self.run_id_ = make_run_id(type(self).__name__)
         self.environment_ = environment()
         self.timestamp_start_ = datetime.datetime.now().isoformat()
         self.trials_computed_ = self.trials_retrieved_ = 0
-        self.estimator_keys_ = [_cache_key(est) for est in self.estimators]
-        self.problem_keys_ = [_cache_key(prob) for prob in self.problems]
+        self.estimator_keys_ = [cache_key(est) for est in self.estimators]
+        self.problem_keys_ = [cache_key(prob) for prob in self.problems]
         run_path = os.path.join(CACHE_DIR, 'runs', f'{self.run_id_}.json')
         if not ignore_cache:
-            save_json(run_path, to_json(self, include_computed=_RUN_FILE_STATE))
+            save_json(run_path, to_json(self, include_computed=RUN_FILE_STATE))
         for prob_idx in range(n_problems):
             if self.verbose:
                 print(self.problems[prob_idx].dataset, end=' ')
@@ -620,7 +620,7 @@ class ExperimentWithPerSeriesSeeding:
                 print()
         self.timestamp_end_ = datetime.datetime.now().isoformat()
         if not ignore_cache:
-            save_json(run_path, to_json(self, include_computed=_RUN_FILE_STATE))
+            save_json(run_path, to_json(self, include_computed=RUN_FILE_STATE))
         return self
 
 
