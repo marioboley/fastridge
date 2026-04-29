@@ -129,6 +129,10 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
+# Claude Code
+.DS_Store
+.claude/
+
 # Figure output
 output/*
 !output/.gitkeep
