@@ -14,6 +14,13 @@ from experiments import (Experiment, Metric,
 from neurips2023 import ExperimentWithPerSeriesSeeding
 
 
+@pytest.fixture
+def cache_dir(tmp_path):
+    """tmp_path with the runs/ subdirectory pre-created, as in a real checkout."""
+    os.makedirs(tmp_path / 'runs')
+    return tmp_path
+
+
 def test_ns_shape():
     prob = EmpiricalDataProblem('diabetes', 'target', zero_variance_filter=True)
     exp = Experiment([prob], [RidgeEM()], reps=2, ns=n_train_from_proportion([prob]))
@@ -137,10 +144,10 @@ def test_new_experiment_trial_cache_hit(tmp_path, monkeypatch):
     np.testing.assert_array_equal(exp1.prediction_r2_, exp2.prediction_r2_)
 
 
-def test_new_experiment_ignore_cache(tmp_path, monkeypatch):
-    monkeypatch.setattr(experiments, 'CACHE_DIR', str(tmp_path))
+def test_new_experiment_ignore_cache(cache_dir, monkeypatch):
+    monkeypatch.setattr(experiments, 'CACHE_DIR', str(cache_dir))
     _simple_new_exp().run(ignore_cache=True)
-    assert not os.path.exists(os.path.join(str(tmp_path), 'trial'))
+    assert not os.path.exists(os.path.join(str(cache_dir), 'trial'))
 
 
 def test_new_experiment_force_recompute(tmp_path, monkeypatch):
@@ -161,14 +168,16 @@ def test_new_experiment_force_recompute(tmp_path, monkeypatch):
 def test_new_experiment_run_file_written(tmp_path, monkeypatch):
     monkeypatch.setattr(experiments, 'CACHE_DIR', str(tmp_path))
     _simple_new_exp().run()
-    assert len(os.listdir(os.path.join(str(tmp_path), 'runs'))) == 1
+    runs_dir = os.path.join(str(tmp_path), 'runs')
+    json_files = [f for f in os.listdir(runs_dir) if f.endswith('.json')]
+    assert len(json_files) == 1
 
 
 def test_new_experiment_run_file_content(tmp_path, monkeypatch):
     monkeypatch.setattr(experiments, 'CACHE_DIR', str(tmp_path))
     _simple_new_exp().run()
     runs_dir = os.path.join(str(tmp_path), 'runs')
-    filenames = os.listdir(runs_dir)
+    filenames = [f for f in os.listdir(runs_dir) if f.endswith('.json')]
     assert len(filenames) == 1
     assert filenames[0].startswith('Experiment__')
     with open(os.path.join(runs_dir, filenames[0])) as f:
@@ -202,10 +211,10 @@ def test_series_exp_cache_hit(tmp_path, monkeypatch):
     np.testing.assert_array_equal(exp1.prediction_r2_, exp2.prediction_r2_)
 
 
-def test_series_exp_ignore_cache(tmp_path, monkeypatch):
-    monkeypatch.setattr(neurips2023, 'CACHE_DIR', str(tmp_path))
+def test_series_exp_ignore_cache(cache_dir, monkeypatch):
+    monkeypatch.setattr(neurips2023, 'CACHE_DIR', str(cache_dir))
     _simple_series_exp().run(ignore_cache=True)
-    assert not os.path.exists(os.path.join(str(tmp_path), 'series'))
+    assert not os.path.exists(os.path.join(str(cache_dir), 'series'))
 
 
 def test_series_exp_reproducible():
@@ -242,3 +251,19 @@ def test_series_exp_overwrite_cache(tmp_path, monkeypatch):
     with open(json_files[0]) as f:
         data = json.load(f)
     assert len(data['computations']) == 1
+
+
+def test_new_experiment_log_file_written(tmp_path, monkeypatch):
+    monkeypatch.setattr(experiments, 'CACHE_DIR', str(tmp_path))
+    _simple_new_exp().run()
+    runs_dir = os.path.join(str(tmp_path), 'runs')
+    log_files = [f for f in os.listdir(runs_dir) if f.endswith('.log')]
+    assert len(log_files) == 1
+
+
+def test_series_exp_log_file_written(tmp_path, monkeypatch):
+    monkeypatch.setattr(neurips2023, 'CACHE_DIR', str(tmp_path))
+    _simple_series_exp().run()
+    runs_dir = os.path.join(str(tmp_path), 'runs')
+    log_files = [f for f in os.listdir(runs_dir) if f.endswith('.log')]
+    assert len(log_files) == 1

@@ -6,13 +6,13 @@ import dataclasses
 import shutil
 import numpy as np
 from sklearn.base import clone
-from fastprogress.fastprogress import progress_bar
+from tqdm.auto import tqdm
 from fastridge import RidgeEM, RidgeLOOCV
 from experiments import (default_stats, CACHE_DIR, cache_key, make_run_id,
                           RUN_FILE_STATE, empirical_default_stats)
 from problems import EmpiricalDataProblem, PolynomialExpansion, onehot_non_numeric
 from data import DATASETS
-from util import save_json, load_json, to_json, environment
+from util import save_json, load_json, to_json, environment, route_warnings_to
 
 
 class SyntheticDataExperiment:
@@ -37,7 +37,7 @@ class SyntheticDataExperiment:
         for stat in self.stats:
             self.__dict__[str(stat) + '_'] = np.zeros(
                 shape=(self.reps, len(self.problems), len(self.ns[0]), len(self.estimators)))
-        for r in progress_bar(range(self.reps)):
+        for r in tqdm(range(self.reps)):
             for i in range(len(self.problems)):
                 x_test, y_test = self.problems[i].rvs(self.test_size, rng=self.rng)
                 for n_idx, n in enumerate(self.ns[i]):
@@ -247,9 +247,6 @@ class ExperimentWithPerSeriesSeeding:
                 warnings.warn(f"[problem={self.problems[prob_idx].dataset}, "
                               f"n={int(self.ns[prob_idx][n_idx])}, "
                               f"est={self.est_names[est_idx]}] {msg}")
-        if self.verbose:
-            for _ in range(self.reps):
-                print('.', end='', flush=True)
 
     def _run_series(self, prob_idx, n_idx, est_idx):
         problem = self.problems[prob_idx]
@@ -269,8 +266,6 @@ class ExperimentWithPerSeriesSeeding:
                 for stat in self.stats:
                     val = stat(_est, problem, X_test, y_test)
                     self.__dict__[str(stat) + '_'][rep_idx, prob_idx, n_idx, est_idx] = val
-            if self.verbose:
-                print('.', end='', flush=True)
 
     def _write_series(self, prob_idx, n_idx, est_idx):
         d = self._series_cache_dir(prob_idx, n_idx, est_idx)
@@ -303,13 +298,25 @@ class ExperimentWithPerSeriesSeeding:
         self.estimator_keys_ = [cache_key(est) for est in self.estimators]
         self.problem_keys_ = [cache_key(prob) for prob in self.problems]
         run_path = os.path.join(CACHE_DIR, 'runs', f'{self.run_id_}.json')
+        log_path = os.path.join(CACHE_DIR, 'runs', f'{self.run_id_}.log')
         if not ignore_cache:
             save_json(run_path, to_json(self, include_computed=RUN_FILE_STATE))
-        for prob_idx in range(n_problems):
+        def _write(text):
             if self.verbose:
-                print(self.problems[prob_idx].dataset, end=' ')
-            for n_idx in range(n_sizes):
-                for est_idx in range(n_estimators):
+                tqdm.write(text)
+            log.write(text + '\n')
+            log.flush()
+
+        with open(log_path, 'w') as log, route_warnings_to(_write, propagate=not self.verbose):
+            for prob_idx in tqdm(range(n_problems), position=0):
+                dataset = self.problems[prob_idx].dataset
+                t0 = time.time()
+                c0, r0 = self.trials_computed_, self.trials_retrieved_
+                series = ((n_idx, est_idx)
+                          for n_idx in range(n_sizes)
+                          for est_idx in range(n_estimators))
+                for n_idx, est_idx in tqdm(series, total=n_sizes * n_estimators,
+                                           desc=dataset, position=1, leave=False):
                     if (not force_recompute and not overwrite_cache and not ignore_cache
                             and self._all_stats_in_series_cache(prob_idx, n_idx, est_idx)):
                         self._retrieve_series(prob_idx, n_idx, est_idx)
@@ -323,8 +330,12 @@ class ExperimentWithPerSeriesSeeding:
                         if not ignore_cache:
                             self._write_series(prob_idx, n_idx, est_idx)
                         self.trials_computed_ += self.reps
-            if self.verbose:
-                print()
+                elapsed = time.time() - t0
+                computed = self.trials_computed_ - c0
+                retrieved = self.trials_retrieved_ - r0
+                if self.verbose:
+                    _write(f'{dataset}  —  {computed} computed, {retrieved} retrieved'
+                           f'  ({elapsed:.1f}s)')
         self.timestamp_end_ = datetime.datetime.now().isoformat()
         if not ignore_cache:
             save_json(run_path, to_json(self, include_computed=RUN_FILE_STATE))

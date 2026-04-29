@@ -13,9 +13,9 @@ import joblib
 from sklearn.base import clone
 from sklearn.linear_model import Ridge, LinearRegression
 from sklearn.metrics import mean_squared_error, r2_score
-from fastprogress.fastprogress import progress_bar
+from tqdm.auto import tqdm
 
-from util import to_json, from_json, save_json, load_json, environment
+from util import to_json, from_json, save_json, load_json, environment, route_warnings_to
 
 
 warnings.formatwarning = lambda message, category, filename, lineno, line=None: (
@@ -464,30 +464,46 @@ class Experiment:
         if not ignore_cache:
             save_json(run_path, to_json(self, include_computed=RUN_FILE_STATE))
 
-        for prob_idx in range(n_problems):
+        log_path = os.path.join(CACHE_DIR, 'runs', f'{self.run_id_}.log')
+
+        def _write(text):
             if self.verbose:
-                print(self.problems[prob_idx].dataset, end=' ')
-            for n_idx in range(n_sizes):
-                for est_idx in range(n_estimators):
-                    for rep_idx in range(self.reps):
-                        if (not force_recompute and not overwrite_cache and not ignore_cache
-                                and self._all_stats_in_trial_cache(
-                                    prob_idx, n_idx, est_idx, rep_idx)):
-                            self._retrieve_trial(prob_idx, n_idx, est_idx, rep_idx)
-                            self.trials_retrieved_ += 1
-                        else:
-                            if overwrite_cache and not ignore_cache:
-                                shutil.rmtree(
-                                    self._trial_cache_dir(prob_idx, n_idx, est_idx, rep_idx),
-                                    ignore_errors=True)
-                            self._run_trial(prob_idx, n_idx, est_idx, rep_idx)
-                            if not ignore_cache:
-                                self._write_trial(prob_idx, n_idx, est_idx, rep_idx)
-                            self.trials_computed_ += 1
-                        if self.verbose:
-                            print('.', end='', flush=True)
-            if self.verbose:
-                print()
+                tqdm.write(text)
+            log.write(text + '\n')
+            log.flush()
+
+        with open(log_path, 'w') as log, route_warnings_to(_write, propagate=not self.verbose):
+            for prob_idx in tqdm(range(n_problems), position=0):
+                dataset = self.problems[prob_idx].dataset
+                t0 = time.time()
+                c0, r0 = self.trials_computed_, self.trials_retrieved_
+                n_trials = n_sizes * n_estimators * self.reps
+                trials = ((n_idx, est_idx, rep_idx)
+                          for n_idx in range(n_sizes)
+                          for est_idx in range(n_estimators)
+                          for rep_idx in range(self.reps))
+                for n_idx, est_idx, rep_idx in tqdm(trials, total=n_trials,
+                                                     desc=dataset, position=1, leave=False):
+                    if (not force_recompute and not overwrite_cache and not ignore_cache
+                            and self._all_stats_in_trial_cache(
+                                prob_idx, n_idx, est_idx, rep_idx)):
+                        self._retrieve_trial(prob_idx, n_idx, est_idx, rep_idx)
+                        self.trials_retrieved_ += 1
+                    else:
+                        if overwrite_cache and not ignore_cache:
+                            shutil.rmtree(
+                                self._trial_cache_dir(prob_idx, n_idx, est_idx, rep_idx),
+                                ignore_errors=True)
+                        self._run_trial(prob_idx, n_idx, est_idx, rep_idx)
+                        if not ignore_cache:
+                            self._write_trial(prob_idx, n_idx, est_idx, rep_idx)
+                        self.trials_computed_ += 1
+                elapsed = time.time() - t0
+                computed = self.trials_computed_ - c0
+                retrieved = self.trials_retrieved_ - r0
+                if self.verbose:
+                    _write(f'{dataset}  —  {computed} computed, {retrieved} retrieved'
+                           f'  ({elapsed:.1f}s)')
         self.timestamp_end_ = datetime.datetime.now().isoformat()
         if not ignore_cache:
             save_json(run_path, to_json(self, include_computed=RUN_FILE_STATE))
