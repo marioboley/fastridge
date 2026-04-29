@@ -4,7 +4,7 @@ import os
 import warnings
 import numpy as np
 import pytest
-from util import to_json, from_json, save_json, load_json, route_warnings_to, _default_showwarning
+from util import to_json, from_json, save_json, load_json, route_warnings_to
 
 
 # ── save_json / load_json ────────────────────────────────────────────────────
@@ -260,7 +260,7 @@ def test_experiment_with_per_series_seeding_roundtrip(tmp_path):
 
 def test_route_warnings_to_redirects():
     received = []
-    with route_warnings_to(received.append):
+    with route_warnings_to(received.append, propagate=False):
         warnings.warn('hello', UserWarning)
     assert received == ['UserWarning: hello']
 
@@ -280,16 +280,16 @@ def test_route_warnings_to_restores_on_exception():
     assert warnings.showwarning is orig
 
 
-def test_route_warnings_to_chains_non_default():
+def test_route_warnings_to_propagate_true_chains():
     chained = []
     sentinel = lambda msg, cat, fn, ln, file=None, line=None: chained.append(str(msg))
-    orig_default = warnings.showwarning
+    orig = warnings.showwarning
     warnings.showwarning = sentinel
     try:
         received = []
-        with route_warnings_to(received.append):
+        with route_warnings_to(received.append, propagate=True):
             warnings.warn('hi', UserWarning)
         assert received == ['UserWarning: hi']
         assert chained == ['hi']
     finally:
-        warnings.showwarning = orig_default
+        warnings.showwarning = orig

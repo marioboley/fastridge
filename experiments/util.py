@@ -11,20 +11,19 @@ from typing import Any
 
 import numpy as np
 
-_default_showwarning = warnings.showwarning
-
-
 @contextlib.contextmanager
-def route_warnings_to(write_fn):
+def route_warnings_to(write_fn, propagate=True):
     """Route warnings.warn output through write_fn for the duration of the block.
 
     Restores the original handler on exit, including on KeyboardInterrupt.
-    If a non-default showwarning is already installed (e.g. pytest's capture
-    handler), it is called after write_fn so both sinks receive the warning.
+    If propagate is True (default), warnings are also forwarded to whatever
+    handler was active before entry (e.g. pytest's capture handler or stderr).
+    Set propagate=False to suppress further propagation, e.g. when write_fn
+    already provides the desired display and stderr output would be redundant.
 
     >>> import warnings
     >>> received = []
-    >>> with route_warnings_to(received.append):
+    >>> with route_warnings_to(received.append, propagate=False):
     ...     warnings.warn('test', UserWarning)
     >>> received[0]
     'UserWarning: test'
@@ -32,7 +31,7 @@ def route_warnings_to(write_fn):
     orig = warnings.showwarning
     def _show(msg, cat, fn, ln, file=None, line=None):
         write_fn(f'{cat.__name__}: {msg}')
-        if orig is not _default_showwarning:
+        if propagate:
             orig(msg, cat, fn, ln, file=file, line=line)
     warnings.showwarning = _show
     try:

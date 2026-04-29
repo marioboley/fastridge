@@ -351,7 +351,8 @@ class RidgeLOOCV(MultiOutputMixin, BaseEstimator, RegressorMixin):
     0.94
     """
 
-    def __init__(self, alphas=np.logspace(-10, 10, 11, endpoint=True, base=10), fit_intercept=True, normalize=True):
+    def __init__(self, alphas=(1e-10, 1e-8, 1e-6, 1e-4, 1e-2, 1.0, 1e2, 1e4, 1e6, 1e8, 1e10),
+                 fit_intercept=True, normalize=True):
         self.alphas=alphas
         self.fit_intercept=fit_intercept
         self.normalize=normalize
@@ -391,7 +392,7 @@ class RidgeLOOCV(MultiOutputMixin, BaseEstimator, RegressorMixin):
             alpha_min, alpha_max = self.alpha_range_GMLNET(x, y)
             self.alphas_ = self.alpha_log_grid(alpha_min, alpha_max, self.alphas)
         else:
-            self.alphas_ = self.alphas
+            self.alphas_ = np.asarray(self.alphas)
 
         svd_start_time = time.time()
         u, s, v_trans = svd(x, full_matrices=False)
