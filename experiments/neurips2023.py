@@ -248,24 +248,27 @@ class ExperimentWithPerSeriesSeeding:
                               f"n={int(self.ns[prob_idx][n_idx])}, "
                               f"est={self.est_names[est_idx]}] {msg}")
 
-    def _run_series(self, prob_idx, n_idx, est_idx):
+    def _run_series(self, prob_idx, n_idx, est_indices, pbar=None):
         problem = self.problems[prob_idx]
         n_train = int(self.ns[prob_idx][n_idx])
         rng = np.random.RandomState(self.seed)
         for rep_idx in range(self.reps):
             X_train, X_test, y_train, y_test = problem.get_X_y(n_train, rng=rng)
-            _est = clone(self.estimators[est_idx], safe=False)
-            try:
-                t0 = time.time()
-                _est.fit(X_train, y_train)
-                _est.fitting_time_ = time.time() - t0
-            except Exception as e:
-                warnings.warn(f"rep {rep_idx} failed for '{self.est_names[est_idx]}'"
-                              f" on '{problem.dataset}': {e}")
-            else:
-                for stat in self.stats:
-                    val = stat(_est, problem, X_test, y_test)
-                    self.__dict__[str(stat) + '_'][rep_idx, prob_idx, n_idx, est_idx] = val
+            for est_idx in est_indices:
+                _est = clone(self.estimators[est_idx], safe=False)
+                try:
+                    t0 = time.time()
+                    _est.fit(X_train, y_train)
+                    _est.fitting_time_ = time.time() - t0
+                except Exception as e:
+                    warnings.warn(f"rep {rep_idx} failed for '{self.est_names[est_idx]}'"
+                                  f" on '{problem.dataset}': {e}")
+                else:
+                    for stat in self.stats:
+                        val = stat(_est, problem, X_test, y_test)
+                        self.__dict__[str(stat) + '_'][rep_idx, prob_idx, n_idx, est_idx] = val
+                if pbar is not None:
+                    pbar.update(1)
 
     def _write_series(self, prob_idx, n_idx, est_idx):
         d = self._series_cache_dir(prob_idx, n_idx, est_idx)
@@ -312,24 +315,28 @@ class ExperimentWithPerSeriesSeeding:
                 dataset = self.problems[prob_idx].dataset
                 t0 = time.time()
                 c0, r0 = self.trials_computed_, self.trials_retrieved_
-                series = ((n_idx, est_idx)
-                          for n_idx in range(n_sizes)
-                          for est_idx in range(n_estimators))
-                for n_idx, est_idx in tqdm(series, total=n_sizes * n_estimators,
-                                           desc=dataset, position=1, leave=False):
-                    if (not force_recompute and not overwrite_cache and not ignore_cache
-                            and self._all_stats_in_series_cache(prob_idx, n_idx, est_idx)):
-                        self._retrieve_series(prob_idx, n_idx, est_idx)
-                        self.trials_retrieved_ += self.reps
-                    else:
-                        if overwrite_cache and not ignore_cache:
-                            shutil.rmtree(
-                                self._series_cache_dir(prob_idx, n_idx, est_idx),
-                                ignore_errors=True)
-                        self._run_series(prob_idx, n_idx, est_idx)
+                n_trials = n_sizes * n_estimators * self.reps
+                pbar = tqdm(total=n_trials, desc=dataset, position=1, leave=False)
+                for n_idx in range(n_sizes):
+                    ests_to_compute = []
+                    for est_idx in range(n_estimators):
+                        if (not force_recompute and not overwrite_cache and not ignore_cache
+                                and self._all_stats_in_series_cache(prob_idx, n_idx, est_idx)):
+                            self._retrieve_series(prob_idx, n_idx, est_idx)
+                            self.trials_retrieved_ += self.reps
+                            pbar.update(self.reps)
+                        else:
+                            if overwrite_cache and not ignore_cache:
+                                shutil.rmtree(
+                                    self._series_cache_dir(prob_idx, n_idx, est_idx),
+                                    ignore_errors=True)
+                            ests_to_compute.append(est_idx)
+                    self._run_series(prob_idx, n_idx, ests_to_compute, pbar=pbar)
+                    for est_idx in ests_to_compute:
                         if not ignore_cache:
                             self._write_series(prob_idx, n_idx, est_idx)
                         self.trials_computed_ += self.reps
+                pbar.close()
                 elapsed = time.time() - t0
                 computed = self.trials_computed_ - c0
                 retrieved = self.trials_retrieved_ - r0

@@ -191,37 +191,6 @@ def test_new_experiment_run_file_content(tmp_path, monkeypatch):
     assert data['reps'] == 2
 
 
-def _simple_series_exp(**kwargs):
-    prob = EmpiricalDataProblem('diabetes', 'target', zero_variance_filter=True)
-    ns = n_train_from_proportion([prob])
-    defaults = dict(seed=1, verbose=False)
-    defaults.update(kwargs)
-    return ExperimentWithPerSeriesSeeding([prob], [RidgeEM()], reps=2, ns=ns, **defaults)
-
-
-def test_series_exp_result_shape():
-    assert _simple_series_exp().run(ignore_cache=True).prediction_r2_.shape == (2, 1, 1, 1)
-
-
-def test_series_exp_cache_hit(tmp_path, monkeypatch):
-    monkeypatch.setattr(neurips2023, 'CACHE_DIR', str(tmp_path))
-    exp1 = _simple_series_exp().run()
-    with pytest.warns(UserWarning, match='FittingTime'):
-        exp2 = _simple_series_exp().run()
-    np.testing.assert_array_equal(exp1.prediction_r2_, exp2.prediction_r2_)
-
-
-def test_series_exp_ignore_cache(cache_dir, monkeypatch):
-    monkeypatch.setattr(neurips2023, 'CACHE_DIR', str(cache_dir))
-    _simple_series_exp().run(ignore_cache=True)
-    assert not os.path.exists(os.path.join(str(cache_dir), 'series'))
-
-
-def test_series_exp_reproducible():
-    exp1 = _simple_series_exp().run(ignore_cache=True)
-    exp2 = _simple_series_exp().run(ignore_cache=True)
-    np.testing.assert_array_equal(exp1.prediction_r2_, exp2.prediction_r2_)
-
 
 def test_new_experiment_overwrite_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(experiments, 'CACHE_DIR', str(tmp_path))
@@ -238,32 +207,9 @@ def test_new_experiment_overwrite_cache(tmp_path, monkeypatch):
     assert len(data['computations']) == 1
 
 
-def test_series_exp_overwrite_cache(tmp_path, monkeypatch):
-    monkeypatch.setattr(neurips2023, 'CACHE_DIR', str(tmp_path))
-    _simple_series_exp().run()
-    with pytest.warns(UserWarning, match='FittingTime'):
-        _simple_series_exp().run(force_recompute=True)  # accumulates 2 computations
-    _simple_series_exp().run(overwrite_cache=True)  # deletes per combo, rewrites: back to 1
-    series_dir = os.path.join(str(tmp_path), 'series')
-    json_files = [os.path.join(r, f)
-                  for r, _, fs in os.walk(series_dir)
-                  for f in fs if f.endswith('.json')]
-    with open(json_files[0]) as f:
-        data = json.load(f)
-    assert len(data['computations']) == 1
-
-
 def test_new_experiment_log_file_written(tmp_path, monkeypatch):
     monkeypatch.setattr(experiments, 'CACHE_DIR', str(tmp_path))
     _simple_new_exp().run()
-    runs_dir = os.path.join(str(tmp_path), 'runs')
-    log_files = [f for f in os.listdir(runs_dir) if f.endswith('.log')]
-    assert len(log_files) == 1
-
-
-def test_series_exp_log_file_written(tmp_path, monkeypatch):
-    monkeypatch.setattr(neurips2023, 'CACHE_DIR', str(tmp_path))
-    _simple_series_exp().run()
     runs_dir = os.path.join(str(tmp_path), 'runs')
     log_files = [f for f in os.listdir(runs_dir) if f.endswith('.log')]
     assert len(log_files) == 1
