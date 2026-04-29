@@ -416,8 +416,12 @@ class Experiment:
     def _run_trial(self, prob_idx, n_idx, est_idx, rep_idx):
         problem = self.problems[prob_idx]
         n_train = int(self.ns[prob_idx][n_idx])
-        rng = np.random.Generator(np.random.PCG64(self.seed + rep_idx))
-        X_train, X_test, y_train, y_test = problem.get_X_y(n_train, rng=rng)
+        data_key = (n_idx, rep_idx)
+        if data_key != self._cached_data_key:
+            rng = np.random.Generator(np.random.PCG64(self.seed + rep_idx))
+            self._cached_data = problem.get_X_y(n_train, rng=rng)
+            self._cached_data_key = data_key
+        X_train, X_test, y_train, y_test = self._cached_data
         _est = clone(self.estimators[est_idx], safe=False)
         try:
             t0 = time.time()
@@ -478,11 +482,13 @@ class Experiment:
                 t0 = time.time()
                 c0, r0 = self.trials_computed_, self.trials_retrieved_
                 n_trials = n_sizes * n_estimators * self.reps
-                trials = ((n_idx, est_idx, rep_idx)
+                self._cached_data_key = None
+                self._cached_data = None
+                trials = ((n_idx, rep_idx, est_idx)
                           for n_idx in range(n_sizes)
-                          for est_idx in range(n_estimators)
-                          for rep_idx in range(self.reps))
-                for n_idx, est_idx, rep_idx in tqdm(trials, total=n_trials,
+                          for rep_idx in range(self.reps)
+                          for est_idx in range(n_estimators))
+                for n_idx, rep_idx, est_idx in tqdm(trials, total=n_trials,
                                                      desc=dataset, position=1, leave=False):
                     if (not force_recompute and not overwrite_cache and not ignore_cache
                             and self._all_stats_in_trial_cache(

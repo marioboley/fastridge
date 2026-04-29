@@ -267,3 +267,19 @@ def test_series_exp_log_file_written(tmp_path, monkeypatch):
     runs_dir = os.path.join(str(tmp_path), 'runs')
     log_files = [f for f in os.listdir(runs_dir) if f.endswith('.log')]
     assert len(log_files) == 1
+
+
+def test_new_experiment_get_x_y_called_once_per_rep(monkeypatch):
+    prob = EmpiricalDataProblem('diabetes', 'target', zero_variance_filter=True)
+    ns = n_train_from_proportion([prob])
+    call_count = {'n': 0}
+    original = EmpiricalDataProblem.get_X_y
+    def counting_get_X_y(self, *args, **kwargs):
+        call_count['n'] += 1
+        return original(self, *args, **kwargs)
+    monkeypatch.setattr(EmpiricalDataProblem, 'get_X_y', counting_get_X_y)
+    exp = Experiment([prob], [RidgeEM(), RidgeEM()], reps=3, ns=ns,
+                     seed=1, verbose=False)
+    exp.run(ignore_cache=True)
+    # 1 n_size * 3 reps — shared across both estimators
+    assert call_count['n'] == 3
