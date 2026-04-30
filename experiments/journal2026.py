@@ -6,17 +6,38 @@ from neurips2023 import NEURIPS2023_TRAIN_SIZES
 
 JOURNAL2026_TRAIN_SIZES = NEURIPS2023_TRAIN_SIZES
 
-JOURNAL2026_D1_REGULAR = [
-    EmpiricalDataProblem('abalone',          'Rings',
-                         x_transforms=onehot_non_numeric, zero_variance_filter=True),
+JOURNAL2026_D1_TINY = [
+    EmpiricalDataProblem('autompg',          'mpg',
+                         drop=('car_name',), nan_policy='drop_rows',
+                         zero_variance_filter=True),
+    EmpiricalDataProblem('diabetes',         'target',
+                         zero_variance_filter=True),
+    EmpiricalDataProblem('real_estate',      'Y house price of unit area',
+                         zero_variance_filter=True),
+    EmpiricalDataProblem('yacht',            'Residuary_resistance',
+                         zero_variance_filter=True),
+]
+
+JOURNAL2026_D1_SMALL = [
     EmpiricalDataProblem('airfoil',          'scaled-sound-pressure',
                          zero_variance_filter=True),
     EmpiricalDataProblem('automobile',       'price',
                          nan_policy='drop_rows', x_transforms=onehot_non_numeric,
                          zero_variance_filter=True),
-    EmpiricalDataProblem('autompg',          'mpg',
-                         drop=('car_name',), nan_policy='drop_rows',
+    EmpiricalDataProblem('boston',           'medv',
                          zero_variance_filter=True),
+    EmpiricalDataProblem('concrete',         'Concrete compressive strength',
+                         zero_variance_filter=True),
+    EmpiricalDataProblem('facebook',         ('comment', 'like', 'share'),
+                         drop=('Total Interactions',), nan_policy='drop_rows',
+                         x_transforms=onehot_non_numeric, zero_variance_filter=True),
+    EmpiricalDataProblem('forest',           'area',
+                         x_transforms=onehot_non_numeric, zero_variance_filter=True),
+]
+
+JOURNAL2026_D1_MEDIUM = [
+    EmpiricalDataProblem('abalone',          'Rings',
+                         x_transforms=onehot_non_numeric, zero_variance_filter=True),
     EmpiricalDataProblem('crime',            'ViolentCrimesPerPop',
                          drop=('state', 'fold', 'communityname'), nan_policy='drop_cols',
                          zero_variance_filter=True),
@@ -24,28 +45,15 @@ JOURNAL2026_D1_REGULAR = [
                          zero_variance_filter=True),
     EmpiricalDataProblem('eye',              'y',
                          zero_variance_filter=True),
-    EmpiricalDataProblem('boston',           'medv',
-                         zero_variance_filter=True),
-    EmpiricalDataProblem('concrete',         'Concrete compressive strength',
-                         zero_variance_filter=True),
-    EmpiricalDataProblem('diabetes',         'target',
-                         zero_variance_filter=True),
-    EmpiricalDataProblem('facebook',         ('comment', 'like', 'share'),
-                         drop=('Total Interactions',), nan_policy='drop_rows',
-                         x_transforms=onehot_non_numeric, zero_variance_filter=True),
-    EmpiricalDataProblem('forest',           'area',
-                         x_transforms=onehot_non_numeric, zero_variance_filter=True),
     EmpiricalDataProblem('naval_propulsion', ('GT_compressor_decay', 'GT_turbine_decay'),
                          zero_variance_filter=True),
     EmpiricalDataProblem('parkinsons',       ('motor_UPDRS', 'total_UPDRS'),
                          zero_variance_filter=True),
-    EmpiricalDataProblem('real_estate',      'Y house price of unit area',
-                         zero_variance_filter=True),
     EmpiricalDataProblem('student',          ('G1', 'G2', 'G3'),
                          x_transforms=onehot_non_numeric, zero_variance_filter=True),
-    EmpiricalDataProblem('yacht',            'Residuary_resistance',
-                         zero_variance_filter=True),
 ]
+
+JOURNAL2026_D1_REGULAR = JOURNAL2026_D1_TINY + JOURNAL2026_D1_SMALL + JOURNAL2026_D1_MEDIUM
 
 JOURNAL2026_D1_LARGE = [
     EmpiricalDataProblem('twitter',   'V78',       zero_variance_filter=True),
@@ -266,5 +274,5 @@ JOURNAL2026_ESTIMATORS = [
 ]
 JOURNAL2026_EST_NAMES = ['EM', 'CV_fix', 'CV_glm']
 
-TIMING_ESTIMATORS = [RidgeEM(), RidgeLOOCV(alphas=101), RidgeLOOCV(alphas=11)]
-TIMING_EST_NAMES  = ['EM', 'CV_glm_101', 'CV_glm_11']
+TIMING_ESTIMATORS = [RidgeEM(), RidgeLOOCV(alphas=11), RidgeLOOCV(alphas=101)]
+TIMING_EST_NAMES  = ['EM', 'CV_glm_11', 'CV_glm_101']
