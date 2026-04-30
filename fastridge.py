@@ -278,6 +278,7 @@ class RidgeEM(MultiOutputMixin, BaseEstimator, RegressorMixin):
         y = y[:, None] if squeeze else y
         q = y.shape[1]
 
+        norm_start_time = time.time()
         a_x = x.mean(axis=0) if self.fit_intercept else np.zeros(p)
         b_x = x.std(axis=0) if self.normalize else np.ones(p)
         x = (x - a_x) / b_x
@@ -285,6 +286,7 @@ class RidgeEM(MultiOutputMixin, BaseEstimator, RegressorMixin):
         a_y = y.mean(axis=0) if self.fit_intercept else np.zeros(q)
         b_y = y.std(axis=0) if self.normalize else np.ones(q)
         y = (y - a_y) / b_y
+        self.normalization_time_ = time.time() - norm_start_time
 
         svd_start_time = time.time()
         u, s, v_trans = svd(x, full_matrices=False)
@@ -380,6 +382,7 @@ class RidgeLOOCV(MultiOutputMixin, BaseEstimator, RegressorMixin):
         y = y[:, None] if squeeze else y
         q = y.shape[1]
 
+        norm_start_time = time.time()
         a_x = x.mean(axis=0) if self.fit_intercept else np.zeros(p)
         b_x = x.std(axis=0) if self.normalize else np.ones(p)
         x = (x - a_x) / b_x
@@ -387,6 +390,7 @@ class RidgeLOOCV(MultiOutputMixin, BaseEstimator, RegressorMixin):
         a_y = y.mean(axis=0) if self.fit_intercept else np.zeros(q)
         b_y = y.std(axis=0) if self.normalize else np.ones(q)
         y = (y - a_y) / b_y
+        self.normalization_time_ = time.time() - norm_start_time
 
         if np.isscalar(self.alphas):
             alpha_min, alpha_max = self.alpha_range_GMLNET(x, y)

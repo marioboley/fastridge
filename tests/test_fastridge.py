@@ -132,3 +132,19 @@ def test_ridge_loocv_predict_2d():
     pred = est.predict(X)
     assert pred.shape == (200, 2)
     np.testing.assert_allclose(pred, X @ est.coef_.T + est.intercept_, rtol=1e-10)
+
+
+def test_ridge_em_normalization_time():
+    X, y, _ = _data()
+    est = RidgeEM().fit(X, y)
+    assert hasattr(est, 'normalization_time_')
+    assert isinstance(est.normalization_time_, float)
+    assert est.normalization_time_ >= 0
+
+
+def test_ridge_loocv_normalization_time():
+    X, y, _ = _data()
+    est = RidgeLOOCV(alphas=5).fit(X, y)
+    assert hasattr(est, 'normalization_time_')
+    assert isinstance(est.normalization_time_, float)
+    assert est.normalization_time_ >= 0
