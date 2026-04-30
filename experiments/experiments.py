@@ -331,6 +331,56 @@ regularization_parameter = RegularizationParameter()
 number_of_iterations = NumberOfIterations()
 variance_abs_error = VarianceAbsoluteError()
 fitting_time = FittingTime()
+
+
+class SvdTime(FittingTime):
+    """Fitting time spent in SVD decomposition.
+
+    Examples
+    --------
+    >>> class _E:
+    ...     svd_time_ = 0.42
+    >>> svd_time(_E(), None, None, None)
+    0.42
+    """
+
+    @staticmethod
+    def __call__(est, prob, x, y):
+        return est.svd_time_
+
+    def __str__(self):
+        return 'svd_time'
+
+    @staticmethod
+    def symbol():
+        return r'$T_\mathrm{svd}$ [s]'
+
+
+class NormalizationTime(FittingTime):
+    """Fitting time spent in input normalization.
+
+    Examples
+    --------
+    >>> class _E:
+    ...     normalization_time_ = 0.07
+    >>> normalization_time(_E(), None, None, None)
+    0.07
+    """
+
+    @staticmethod
+    def __call__(est, prob, x, y):
+        return est.normalization_time_
+
+    def __str__(self):
+        return 'normalization_time'
+
+    @staticmethod
+    def symbol():
+        return r'$T_\mathrm{norm}$ [s]'
+
+
+svd_time = SvdTime()
+normalization_time = NormalizationTime()
 prediction_r2 = PredictionR2()
 number_of_features = NumberOfFeatures()
 
