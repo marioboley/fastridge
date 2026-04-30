@@ -85,3 +85,53 @@ def test_neurips2023_zero_variance_filter():
     assert all(p.zero_variance_filter for p in NEURIPS2023)
     assert all(p.zero_variance_filter for p in NEURIPS2023_D2)
     assert all(p.zero_variance_filter for p in NEURIPS2023_D3)
+
+
+def test_polynomial_expansion_matches_sklearn_degree2():
+    from sklearn.preprocessing import PolynomialFeatures
+    X = pd.DataFrame({'a': [1.0, 2.0, 3.0], 'b': [4.0, 5.0, 6.0]})
+    result = PolynomialExpansion(2)(X, np.random.default_rng(0))
+    poly = PolynomialFeatures(degree=2, include_bias=False)
+    expected = pd.DataFrame(
+        poly.fit_transform(X),
+        columns=poly.get_feature_names_out(X.columns),
+        index=X.index
+    )
+    pd.testing.assert_frame_equal(result, expected)
+
+
+def test_polynomial_expansion_matches_sklearn_degree3():
+    from sklearn.preprocessing import PolynomialFeatures
+    X = pd.DataFrame({'a': [1.0, 2.0], 'b': [3.0, 4.0], 'c': [5.0, 6.0]})
+    result = PolynomialExpansion(3)(X, np.random.default_rng(0))
+    poly = PolynomialFeatures(degree=3, include_bias=False)
+    expected = pd.DataFrame(
+        poly.fit_transform(X),
+        columns=poly.get_feature_names_out(X.columns),
+        index=X.index
+    )
+    pd.testing.assert_frame_equal(result, expected)
+
+
+def test_polynomial_expansion_feature_values_correct():
+    X = pd.DataFrame({'a': [2.0, 3.0], 'b': [4.0, 5.0]})
+    result = PolynomialExpansion(2)(X, np.random.default_rng(0))
+    np.testing.assert_array_equal(result['a^2'].values, [4.0, 9.0])
+    np.testing.assert_array_equal(result['a b'].values, [8.0, 15.0])
+    np.testing.assert_array_equal(result['b^2'].values, [16.0, 25.0])
+
+
+def test_polynomial_expansion_subsampled_values_match_sklearn():
+    from sklearn.preprocessing import PolynomialFeatures
+    X = pd.DataFrame({'a': [2.0, 3.0, 4.0], 'b': [5.0, 6.0, 7.0]})
+    # budget = ceil(12/3) = 4 cols; 2 linear + 2 of 3 interactions
+    result = PolynomialExpansion(2, max_entries=12)(X, np.random.default_rng(0))
+    poly = PolynomialFeatures(degree=2, include_bias=False)
+    full = pd.DataFrame(
+        poly.fit_transform(X),
+        columns=poly.get_feature_names_out(X.columns),
+        index=X.index
+    )
+    for col in result.columns:
+        np.testing.assert_array_almost_equal(result[col].values, full[col].values,
+                                             err_msg=f'column {col!r} mismatch')

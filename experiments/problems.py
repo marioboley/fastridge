@@ -7,7 +7,9 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 from scipy.stats import wishart, multivariate_normal, uniform
-from sklearn.preprocessing import OneHotEncoder, PolynomialFeatures
+from itertools import combinations_with_replacement
+
+from sklearn.preprocessing import OneHotEncoder
 
 from data import get_dataset, DATASETS
 
@@ -203,7 +205,7 @@ class PolynomialExpansion:
     Parameters
     ----------
     degree : int
-        Polynomial degree passed to PolynomialFeatures.
+        Polynomial degree.
     max_entries : int, optional
         Maximum total entries (n * p_expanded) before interaction columns are
         subsampled; linear columns are always kept. Default 50_000_000.
@@ -237,22 +239,56 @@ class PolynomialExpansion:
     degree: int
     max_entries: int = 50_000_000
 
+    @staticmethod
+    def _feature_name(col_names, combo):
+        """Return sklearn-compatible name for a polynomial combination.
+
+        combo is a tuple of column indices with repetition, sorted ascending.
+        Example: (0, 0, 1) with col_names ['a', 'b'] gives 'a^2 b'.
+
+        >>> PolynomialExpansion._feature_name(['a', 'b', 'c'], (0, 0, 1))
+        'a^2 b'
+        >>> PolynomialExpansion._feature_name(['a', 'b'], (1, 1, 1))
+        'b^3'
+        """
+        counts = {}
+        for idx in combo:
+            counts[idx] = counts.get(idx, 0) + 1
+        return ' '.join(
+            f'{col_names[idx]}^{exp}' if exp > 1 else col_names[idx]
+            for idx, exp in sorted(counts.items())
+        )
+
     def __call__(self, X, rng):
-        poly = PolynomialFeatures(degree=self.degree, include_bias=False)
-        X_poly = pd.DataFrame(
-            poly.fit_transform(X),
-            columns=poly.get_feature_names_out(X.columns),
+        X_arr = np.asarray(X, dtype=float)
+        n, p = X_arr.shape
+        col_names = list(X.columns)
+        all_combos = [
+            combo
+            for d in range(2, self.degree + 1)
+            for combo in combinations_with_replacement(range(p), d)
+        ]
+        if n * (p + len(all_combos)) > self.max_entries:
+            p_budget = int(np.ceil(self.max_entries / n))
+            pnew = max(0, min(len(all_combos), p_budget - p))
+            sampled = sorted(rng.choice(len(all_combos), size=pnew, replace=False))
+            selected_combos = [all_combos[i] for i in sampled]
+        else:
+            selected_combos = all_combos
+        higher_degree_cols = []
+        higher_degree_names = []
+        for combo in selected_combos:
+            col = np.ones(n)
+            for idx in combo:
+                col *= X_arr[:, idx]
+            higher_degree_cols.append(col)
+            higher_degree_names.append(self._feature_name(col_names, combo))
+        all_cols = [X_arr[:, i] for i in range(p)] + higher_degree_cols
+        return pd.DataFrame(
+            np.column_stack(all_cols),
+            columns=col_names + higher_degree_names,
             index=X.index
         )
-        n, p = X_poly.shape
-        if n * p > self.max_entries:
-            linear_cols = list(X.columns)
-            interaction_cols = [c for c in X_poly.columns if c not in linear_cols]
-            p_budget = int(np.ceil(self.max_entries / n))
-            pnew = max(0, min(len(interaction_cols), p_budget - len(linear_cols)))
-            sampled = sorted(rng.choice(len(interaction_cols), size=pnew, replace=False))
-            return X_poly[linear_cols + [interaction_cols[i] for i in sampled]]
-        return X_poly
 
 
 @dataclass(frozen=True)
