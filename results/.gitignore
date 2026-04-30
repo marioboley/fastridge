@@ -1,2 +1,5 @@
 *
 !.gitignore
+!runs/
+!series/
+!trial/
