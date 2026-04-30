@@ -1,8 +1,22 @@
 # Known Issues with NeurIPS 2023 Experiments
 
-## Polynomial Feature Subsampling
+## Semantic Dataset Preparation and Provenance
 
-### Intent
+For several of the real-world datasets, there are issues in the prediction problem definitions and in some cases the provenance is unclear. Issues include
+
+- not to define joint multi-target regression problems for datasets with more than one target
+- not recognising all designed target attributes and corresponding information leakage 
+- missing categorical variables where the categories are encoded as integers
+
+### Facebook
+
+The prediction problem uses variable `Total Interactions` as target, defined as sum of variables `comment`, `like`, `share`, without dropping those variables. As a result, not only is the multi-target nature of the problem not reflected, but also a severe information leakage is introduced that renders the problem trivial.
+
+## Broader Data Processing Issues
+
+### Polynomial Feature Subsampling
+
+#### Intent
 
 Section 5.2 of the NeurIPS paper states:
 
@@ -25,7 +39,7 @@ $$
 
 For the dataset `twitter`, the number of columns reported in Tab. 2 of the paper ($86$), matches this formula after rounding, noting that the symbol $n$ in this table refers to the train size $n_\mathrm{train}=408275$ and assuming that the reported number of "raw features" $p=77$ refers indeed to the number of variables of the linear model (i.e., no one-hot-encoding).
 
-### Legacy code
+#### Legacy code
 
 The original experiment runner implemented the feature limit with the following code fragment located *before* the training/test split (and after one-hot-encoding of columns with `dtype in ['object', 'category']`):
 
@@ -68,7 +82,7 @@ For the Twitter dataset (n = 583 250, p_linear = 77, d = 2):
 The paper's Table reports p* = 86 for Twitter at d = 2, which matches the
 stated formula after rounding and indicates that the legacy code present in the repository was in fact **not** used to run the reported experiments. 
 
-### Current implementation
+#### Current implementation
 
 The inconsistent behaviour of the legacy code is therefore not retained in the current
 codebase and `PolynomialExpansion` instead, implement the paper's stated intent.
@@ -80,11 +94,11 @@ equivalent of a 35M training-matrix budget at a 70/30 split. When
 `max(0, ceil(max_entries/n) - p_linear)` interaction columns, bounding the
 total feature count to `ceil(max_entries/n)`.
 
-## Redundant Higher-Order Features 
+### Redundant Higher-Order Features 
 
 On a more conceptual level, the interaction of the polynomial feature expansion with one-hot-encoding means that a number of redundant features is created, because for $x \in \{0, 1\}$ resulting from one-hot-encoding we have $x=x^2=x^3$.
 
-## Unreproduced Feature Counts
+### Unreproduced Feature Counts
 
 Comparison of the paper's reported p* values against the current implementation
 at d = 2 reveals two datasets with discrepancies (all others checked matched).
@@ -104,7 +118,7 @@ and several missing-value patterns that interact with the zero-variance filter
 in ways that differ from the paper's reported count. The root cause has not been
 identified.
 
-## Seeding
+### Seeding
 
 In `EmpiricalDataExperiment.run()`, the experiment seed is applied to the global
 numpy random state *after* `problem.get_X_y()` is called:

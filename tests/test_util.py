@@ -1,9 +1,10 @@
+import contextlib
 import json
 import os
 import warnings
 import numpy as np
 import pytest
-from util import to_json, from_json, save_json, load_json
+from util import to_json, from_json, save_json, load_json, route_warnings_to
 
 
 # ── save_json / load_json ────────────────────────────────────────────────────
@@ -236,8 +237,10 @@ def test_experiment_roundtrip(tmp_path):
 
 def test_experiment_with_per_series_seeding_roundtrip(tmp_path):
     from fastridge import RidgeEM, RidgeLOOCV
-    from experiments import ExperimentWithPerSeriesSeeding, prediction_r2
-    from problems import EmpiricalDataProblem, NEURIPS2023_TRAIN_SIZES
+    from neurips2023 import ExperimentWithPerSeriesSeeding
+    from experiments import prediction_r2
+    from problems import EmpiricalDataProblem
+    from neurips2023 import NEURIPS2023_TRAIN_SIZES
 
     problems = [EmpiricalDataProblem('diabetes', 'target', zero_variance_filter=True)]
     estimators = [RidgeEM(t2=False), RidgeLOOCV(alphas=np.logspace(-10, 10, 11, base=10))]
@@ -251,3 +254,42 @@ def test_experiment_with_per_series_seeding_roundtrip(tmp_path):
     save_json(path, to_json(exp))
     reconstructed = load_json(path)
     assert to_json(reconstructed) == to_json(exp)
+
+
+# ── route_warnings_to ────────────────────────────────────────────────────────
+
+def test_route_warnings_to_redirects():
+    received = []
+    with route_warnings_to(received.append, propagate=False):
+        warnings.warn('hello', UserWarning)
+    assert received == ['UserWarning: hello']
+
+
+def test_route_warnings_to_restores_on_exit():
+    orig = warnings.showwarning
+    with route_warnings_to(lambda s: None):
+        pass
+    assert warnings.showwarning is orig
+
+
+def test_route_warnings_to_restores_on_exception():
+    orig = warnings.showwarning
+    with contextlib.suppress(ValueError):
+        with route_warnings_to(lambda s: None):
+            raise ValueError
+    assert warnings.showwarning is orig
+
+
+def test_route_warnings_to_propagate_true_chains():
+    chained = []
+    sentinel = lambda msg, cat, fn, ln, file=None, line=None: chained.append(str(msg))
+    orig = warnings.showwarning
+    warnings.showwarning = sentinel
+    try:
+        received = []
+        with route_warnings_to(received.append, propagate=True):
+            warnings.warn('hi', UserWarning)
+        assert received == ['UserWarning: hi']
+        assert chained == ['hi']
+    finally:
+        warnings.showwarning = orig

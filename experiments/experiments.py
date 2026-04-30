@@ -1,6 +1,7 @@
 import time
 import warnings
 import os
+import shutil
 import datetime
 import random
 import string
@@ -12,20 +13,24 @@ import joblib
 from sklearn.base import clone
 from sklearn.linear_model import Ridge, LinearRegression
 from sklearn.metrics import mean_squared_error, r2_score
-from fastprogress.fastprogress import progress_bar
+from tqdm.auto import tqdm
 
-from util import to_json, from_json, save_json, load_json, environment
+from util import to_json, from_json, save_json, load_json, environment, route_warnings_to
 
+
+warnings.formatwarning = lambda message, category, filename, lineno, line=None: (
+    f'{category.__name__}: {message}\n'
+)
 
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'results')
 
-_RUN_FILE_STATE = [
+RUN_FILE_STATE = [
     'run_id_', 'timestamp_start_', 'timestamp_end_', 'environment_',
     'problem_keys_', 'estimator_keys_', 'trials_retrieved_', 'trials_computed_'
 ]
 
 
-def _cache_key(obj, slug=''):
+def cache_key(obj, slug=''):
     """Return a filesystem-safe cache key for obj.
 
     The key is ``ClassName[_slug]__<joblib_hash>``. The optional slug is
@@ -33,9 +38,9 @@ def _cache_key(obj, slug=''):
     directories human-browsable; callers are responsible for supplying a
     meaningful, filesystem-safe value (e.g. a dataset name).
 
-    >>> _cache_key(object(), slug='')[:len('object__')]
+    >>> cache_key(object(), slug='')[:len('object__')]
     'object__'
-    >>> key = _cache_key(object(), slug='iris')
+    >>> key = cache_key(object(), slug='iris')
     >>> key.startswith('object_iris__')
     True
     """
@@ -44,7 +49,7 @@ def _cache_key(obj, slug=''):
 
 
 
-def _make_run_id(class_name):
+def make_run_id(class_name):
     """Return a unique run identifier string of the form ``ClassName__YYYYMMDD-HHMMSS-xxxx``.
 
     The timestamp component is the current local time; the four-character
@@ -72,13 +77,26 @@ class Metric:
 
 
 class ParameterMeanSquaredError(Metric):
+    """Mean squared error between estimated and true coefficients, averaged over all elements.
+
+    Applicable only to synthetic experiments where prob.beta is defined.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> class _E:
+    ...     coef_ = np.array([[1.0, 2.0], [3.0, 4.0]])
+    >>> class _P:
+    ...     beta = np.array([[1.1, 1.9], [2.9, 4.1]])
+    >>> round(parameter_mean_squared_error(_E(), _P(), None, None), 2)
+    0.01
+    """
 
     @staticmethod
     def __call__(est, prob, x, y):
-        return ((est.coef_ - prob.beta)**2).mean()
+        return float(((est.coef_ - prob.beta)**2).mean())
 
-    @staticmethod
-    def __str__():
+    def __str__(self):
         return 'parameter_mean_squared_errors'
 
     @staticmethod
@@ -87,13 +105,24 @@ class ParameterMeanSquaredError(Metric):
 
 
 class PredictionMeanSquaredError(Metric):
+    """Mean squared error between predictions and test targets, averaged over all elements.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from sklearn.linear_model import Ridge
+    >>> X2 = np.eye(3)
+    >>> Y2 = np.column_stack([np.array([1., 2., 3.]), np.array([3., 2., 1.])])
+    >>> est2 = Ridge(alpha=0.0001).fit(X2, Y2)
+    >>> prediction_mean_squared_error(est2, None, X2, Y2) < 1e-6
+    True
+    """
 
     @staticmethod
     def __call__(est, prob, x, y):
-        return ((est.predict(x) - y)**2).mean()
+        return float(((est.predict(x) - np.asarray(y))**2).mean())
 
-    @staticmethod
-    def __str__():
+    def __str__(self):
         return 'prediction_mean_squared_errors'
 
     @staticmethod
@@ -102,13 +131,22 @@ class PredictionMeanSquaredError(Metric):
 
 
 class RegularizationParameter(Metric):
+    """Mean regularization parameter alpha_ across targets.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> class _E:
+    ...     alpha_ = np.array([1.0, 3.0])
+    >>> regularization_parameter(_E(), None, None, None)
+    2.0
+    """
 
     @staticmethod
     def __call__(est, prob, x, y):
-        return est.alpha_
+        return float(np.mean(est.alpha_))
 
-    @staticmethod
-    def __str__():
+    def __str__(self):
         return 'lambda'
 
     @staticmethod
@@ -117,20 +155,39 @@ class RegularizationParameter(Metric):
 
 
 class NumberOfIterations(Metric):
+    """Total EM steps or total LOO alpha evaluations across all targets.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from fastridge import RidgeEM, RidgeLOOCV
+    >>> from sklearn.linear_model import RidgeCV
+    >>> rng = np.random.default_rng(0)
+    >>> X = rng.standard_normal((20, 3))
+    >>> Y = rng.standard_normal((20, 2))
+    >>> em = RidgeEM().fit(X, Y)
+    >>> number_of_iterations(em, None, None, Y) == int(sum(em.iterations_))
+    True
+    >>> cv = RidgeLOOCV(alphas=10).fit(X, Y)
+    >>> number_of_iterations(cv, None, None, Y)
+    20
+    >>> cv_sk = RidgeCV(alphas=[0.1, 1.0, 10.0]).fit(X, Y[:, 0])
+    >>> number_of_iterations(cv_sk, None, None, Y[:, 0])
+    3
+    """
 
     @staticmethod
     def __call__(est, prob, x, y):
         if hasattr(est, 'iterations_'):
-            return est.iterations_
+            return int(np.sum(est.iterations_))
         elif hasattr(est, 'alphas_'):
-            return len(est.alphas_)
+            return len(est.alphas_) * (y.shape[1] if np.ndim(y) > 1 else 1)
         elif hasattr(est, 'alphas'):
             return len(est.alphas)
         else:
             return float('nan')
 
-    @staticmethod
-    def __str__():
+    def __str__(self):
         return 'number_of_iterations'
 
     @staticmethod
@@ -139,16 +196,29 @@ class NumberOfIterations(Metric):
 
 
 class VarianceAbsoluteError(Metric):
+    """Mean absolute error between estimated and true noise variance, averaged across targets.
+
+    Returns NaN when the estimator has no sigma_square_ attribute.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> class _E:
+    ...     sigma_square_ = np.array([0.25, 0.36])
+    >>> class _P:
+    ...     sigma = 0.5
+    >>> round(variance_abs_error(_E(), _P(), None, None), 3)
+    0.055
+    """
 
     @staticmethod
     def __call__(est, prob, x, y):
         if hasattr(est, 'sigma_square_'):
-            return abs(prob.sigma**2 - est.sigma_square_)
+            return float(np.mean(np.abs(prob.sigma**2 - est.sigma_square_)))
         else:
             return float('nan')
 
-    @staticmethod
-    def __str__():
+    def __str__(self):
         return 'variance_abs_error'
 
     @staticmethod
@@ -183,8 +253,7 @@ class FittingTime(Metric):
     def __call__(est, prob, x, y):
         return est.fitting_time_
 
-    @staticmethod
-    def __str__():
+    def __str__(self):
         return 'fitting_time'
 
     @staticmethod
@@ -193,7 +262,7 @@ class FittingTime(Metric):
 
 
 class PredictionR2(Metric):
-    """Computes R² between predictions and test targets.
+    """R^2 between predictions and test targets; uniform average across targets.
 
     Examples
     --------
@@ -202,16 +271,20 @@ class PredictionR2(Metric):
     >>> X = np.arange(10).reshape(-1, 1).astype(float)
     >>> y = np.arange(10).astype(float)
     >>> est = Ridge(alpha=0.0001).fit(X, y)
-    >>> round(float(prediction_r2(est, None, X, y)), 4)
+    >>> round(prediction_r2(est, None, X, y), 4)
     1.0
+    >>> X3 = np.eye(3)
+    >>> Y3 = np.column_stack([np.array([1., 2., 3.]), np.array([3., 2., 1.])])
+    >>> est3 = Ridge(alpha=0.0001).fit(X3, Y3)
+    >>> prediction_r2(est3, None, X3, Y3) > 0.99
+    True
     """
 
     @staticmethod
     def __call__(est, prob, x, y):
-        return r2_score(y, est.predict(x))
+        return float(r2_score(y, est.predict(x)))
 
-    @staticmethod
-    def __str__():
+    def __str__(self):
         return 'prediction_r2'
 
     @staticmethod
@@ -220,7 +293,7 @@ class PredictionR2(Metric):
 
 
 class NumberOfFeatures(Metric):
-    """Returns the number of features used by the estimator (len of coef_).
+    """Returns the number of features used by the estimator (last dim of coef_.shape).
 
     Examples
     --------
@@ -231,16 +304,20 @@ class NumberOfFeatures(Metric):
     >>> est = Ridge(alpha=0.0001).fit(X, y)
     >>> number_of_features(est, None, X, y)
     1
+    >>> X4 = np.arange(20).reshape(10, 2).astype(float)
+    >>> Y4 = np.column_stack([X4[:, 0], X4[:, 1]])
+    >>> est4 = Ridge(alpha=0.0001).fit(X4, Y4)
+    >>> number_of_features(est4, None, None, None)
+    2
     """
 
     @staticmethod
     def __call__(est, prob, x, y):
         if hasattr(est, 'coef_'):
-            return len(est.coef_)
+            return est.coef_.shape[-1]
         return float('nan')
 
-    @staticmethod
-    def __str__():
+    def __str__(self):
         return 'number_of_features'
 
     @staticmethod
@@ -306,9 +383,9 @@ class Experiment:
         return os.path.join(
             CACHE_DIR, 'trial',
             self.problem_keys_[prob_idx],
-            # _cache_key(self.problems[prob_idx]),
+            # cache_key(self.problems[prob_idx]),
             str(int(self.ns[prob_idx][n_idx])),
-            # _cache_key(self.estimators[est_idx]),
+            # cache_key(self.estimators[est_idx]),
             self.estimator_keys_[est_idx],
             str(self.seed + rep_idx),
         )
@@ -332,13 +409,19 @@ class Experiment:
             save_json(path, data, indent=None)
             msg = stat.warn_retrieval(data['computations'])
             if msg:
-                warnings.warn(msg)
+                warnings.warn(f"[problem={self.problems[prob_idx].dataset}, "
+                              f"n={int(self.ns[prob_idx][n_idx])}, "
+                              f"est={self.est_names[est_idx]}, rep={rep_idx}] {msg}")
 
     def _run_trial(self, prob_idx, n_idx, est_idx, rep_idx):
         problem = self.problems[prob_idx]
         n_train = int(self.ns[prob_idx][n_idx])
-        rng = np.random.Generator(np.random.PCG64(self.seed + rep_idx))
-        X_train, X_test, y_train, y_test = problem.get_X_y(n_train, rng=rng)
+        data_key = (n_idx, rep_idx)
+        if data_key != self._cached_data_key:
+            rng = np.random.Generator(np.random.PCG64(self.seed + rep_idx))
+            self._cached_data = problem.get_X_y(n_train, rng=rng)
+            self._cached_data_key = data_key
+        X_train, X_test, y_train, y_test = self._cached_data
         _est = clone(self.estimators[est_idx], safe=False)
         try:
             t0 = time.time()
@@ -362,193 +445,74 @@ class Experiment:
                 msg = stat.warn_recompute(
                     [c['value'] for c in data['computations']], new_val)
                 if msg:
-                    warnings.warn(msg)
+                    warnings.warn(f"[problem={self.problems[prob_idx].dataset}, "
+                                  f"n={int(self.ns[prob_idx][n_idx])}, "
+                                  f"est={self.est_names[est_idx]}, rep={rep_idx}] {msg}")
             data['computations'].append({'value': to_json(new_val), 'run_id': self.run_id_})
             save_json(path, data, indent=None)
 
-    def run(self, force_recompute=False, ignore_cache=False):
+    def run(self, force_recompute=False, ignore_cache=False, overwrite_cache=False):
         n_problems = len(self.problems)
         n_sizes = len(self.ns[0])
         n_estimators = len(self.estimators)
         for stat in self.stats:
             self.__dict__[str(stat) + '_'] = np.full(
                 (self.reps, n_problems, n_sizes, n_estimators), np.nan)
-        self.run_id_ = _make_run_id(type(self).__name__)
+        self.run_id_ = make_run_id(type(self).__name__)
         self.timestamp_start_ = datetime.datetime.now().isoformat()
         self.trials_computed_ = self.trials_retrieved_ = 0
         self.environment_ = environment()
-        self.estimator_keys_ = [_cache_key(est) for est in self.estimators]
-        self.problem_keys_ = [_cache_key(prob) for prob in self.problems]
+        self.estimator_keys_ = [cache_key(est) for est in self.estimators]
+        self.problem_keys_ = [cache_key(prob) for prob in self.problems]
         run_path = os.path.join(CACHE_DIR, 'runs', f'{self.run_id_}.json')
         if not ignore_cache:
-            save_json(run_path, to_json(self, include_computed=_RUN_FILE_STATE))
-    
-        for prob_idx in range(n_problems):
+            save_json(run_path, to_json(self, include_computed=RUN_FILE_STATE))
+
+        log_path = os.path.join(CACHE_DIR, 'runs', f'{self.run_id_}.log')
+
+        def _write(text):
             if self.verbose:
-                print(self.problems[prob_idx].dataset, end=' ')
-            for n_idx in range(n_sizes):
-                for est_idx in range(n_estimators):
-                    for rep_idx in range(self.reps):
-                        if (not force_recompute and not ignore_cache
-                                and self._all_stats_in_trial_cache(
-                                    prob_idx, n_idx, est_idx, rep_idx)):
-                            self._retrieve_trial(prob_idx, n_idx, est_idx, rep_idx)
-                            self.trials_retrieved_ += 1
-                        else:
-                            self._run_trial(prob_idx, n_idx, est_idx, rep_idx)
-                            if not ignore_cache:
-                                self._write_trial(prob_idx, n_idx, est_idx, rep_idx)
-                            self.trials_computed_ += 1
-                        if self.verbose:
-                            print('.', end='', flush=True)
-            if self.verbose:
-                print()
-        self.timestamp_end_ = datetime.datetime.now().isoformat()
-        if not ignore_cache:
-            save_json(run_path, to_json(self, include_computed=_RUN_FILE_STATE))
-        return self
+                tqdm.write(text)
+            log.write(text + '\n')
+            log.flush()
 
-
-class ExperimentWithPerSeriesSeeding:
-    """Run repeated train/test experiments with per-series MT19937 seeding.
-
-    Numerically identical to EmpiricalDataExperiment(generator='MT19937',
-    seed_scope='series', seed_progression='fixed') at the same seed. Results
-    are cached per (problem, n_train, estimator, reps, seed).
-
-    Parameters
-    ----------
-    problems : list of EmpiricalDataProblem
-    estimators : list of estimator objects
-    reps : int
-    ns : array-like of shape (n_problems, n_sizes)
-        A 1-D input is broadcast to all problems.
-    seed : int or None
-    stats : list of Metric or None
-    est_names : list of str or None
-    verbose : bool, default True
-    """
-
-    def __init__(self, problems, estimators, reps, ns,
-                 seed=None, stats=None, est_names=None, verbose=True):
-        self.problems = problems
-        self.estimators = estimators
-        self.reps = reps
-        self.ns = np.atleast_2d(ns)
-        if len(self.ns) != len(self.problems):
-            self.ns = self.ns.repeat(len(self.problems), axis=0)
-        self.seed = seed
-        self.stats = empirical_default_stats if stats is None else stats
-        self.est_names = [str(e) for e in estimators] if est_names is None else est_names
-        self.verbose = verbose
-
-    def _series_cache_dir(self, prob_idx, n_idx, est_idx):
-        return os.path.join(
-            CACHE_DIR, 'series',
-            # _cache_key(self.problems[prob_idx]),
-            self.problem_keys_[prob_idx],
-            str(int(self.ns[prob_idx][n_idx])),
-            # _cache_key(self.estimators[est_idx]),
-            self.estimator_keys_[est_idx],
-            str(self.reps),
-            str(self.seed),
-        )
-
-    def _all_stats_in_series_cache(self, prob_idx, n_idx, est_idx):
-        d = self._series_cache_dir(prob_idx, n_idx, est_idx)
-        return all(
-            load_json(os.path.join(d, str(stat) + '.json'),
-                      default={'computations': [], 'retrievals': []})['computations']
-            for stat in self.stats
-        )
-
-    def _retrieve_series(self, prob_idx, n_idx, est_idx):
-        d = self._series_cache_dir(prob_idx, n_idx, est_idx)
-        for stat in self.stats:
-            path = os.path.join(d, str(stat) + '.json')
-            data = load_json(path, default={'computations': [], 'retrievals': []})
-            values = [np.asarray(c['value']) for c in data['computations']]
-            mean_val = np.mean(values, axis=0)
-            self.__dict__[str(stat) + '_'][:, prob_idx, n_idx, est_idx] = mean_val
-            data['retrievals'].append({'value': to_json(mean_val), 'run_id': self.run_id_})
-            save_json(path, data, indent=None)
-            msg = stat.warn_retrieval(data['computations'])
-            if msg:
-                warnings.warn(msg)
-        if self.verbose:
-            for _ in range(self.reps):
-                print('.', end='', flush=True)
-
-    def _run_series(self, prob_idx, n_idx, est_idx):
-        problem = self.problems[prob_idx]
-        n_train = int(self.ns[prob_idx][n_idx])
-        rng = np.random.RandomState(self.seed)
-        for rep_idx in range(self.reps):
-            X_train, X_test, y_train, y_test = problem.get_X_y(n_train, rng=rng)
-            _est = clone(self.estimators[est_idx], safe=False)
-            try:
+        with open(log_path, 'w') as log, route_warnings_to(_write, propagate=not self.verbose):
+            for prob_idx in tqdm(range(n_problems), position=0):
+                dataset = self.problems[prob_idx].dataset
                 t0 = time.time()
-                _est.fit(X_train, y_train)
-                _est.fitting_time_ = time.time() - t0
-            except Exception as e:
-                warnings.warn(f"rep {rep_idx} failed for '{self.est_names[est_idx]}'"
-                              f" on '{problem.dataset}': {e}")
-            else:
-                for stat in self.stats:
-                    val = stat(_est, problem, X_test, y_test)
-                    self.__dict__[str(stat) + '_'][rep_idx, prob_idx, n_idx, est_idx] = val
-            if self.verbose:
-                print('.', end='', flush=True)
-
-    def _write_series(self, prob_idx, n_idx, est_idx):
-        d = self._series_cache_dir(prob_idx, n_idx, est_idx)
-        for stat in self.stats:
-            path = os.path.join(d, str(stat) + '.json')
-            data = load_json(path, default={'computations': [], 'retrievals': []})
-            new_values = self.__dict__[str(stat) + '_'][:, prob_idx, n_idx, est_idx]
-            if data['computations']:
-                msg = stat.warn_recompute(
-                    [c['value'] for c in data['computations']], new_values)
-                if msg:
-                    warnings.warn(msg)
-            data['computations'].append({'value': to_json(new_values), 'run_id': self.run_id_})
-            save_json(path, data, indent=None)
-
-    def run(self, force_recompute=False, ignore_cache=False):
-        n_problems = len(self.problems)
-        n_sizes = len(self.ns[0])
-        n_estimators = len(self.estimators)
-        for stat in self.stats:
-            self.__dict__[str(stat) + '_'] = np.full(
-                (self.reps, n_problems, n_sizes, n_estimators), np.nan)
-        self.run_id_ = _make_run_id(type(self).__name__)
-        self.environment_ = environment()
-        self.timestamp_start_ = datetime.datetime.now().isoformat()
-        self.trials_computed_ = self.trials_retrieved_ = 0
-        self.estimator_keys_ = [_cache_key(est) for est in self.estimators]
-        self.problem_keys_ = [_cache_key(prob) for prob in self.problems]
-        run_path = os.path.join(CACHE_DIR, 'runs', f'{self.run_id_}.json')
-        if not ignore_cache:
-            save_json(run_path, to_json(self, include_computed=_RUN_FILE_STATE))
-        for prob_idx in range(n_problems):
-            if self.verbose:
-                print(self.problems[prob_idx].dataset, end=' ')
-            for n_idx in range(n_sizes):
-                for est_idx in range(n_estimators):
-                    if (not force_recompute and not ignore_cache
-                            and self._all_stats_in_series_cache(prob_idx, n_idx, est_idx)):
-                        self._retrieve_series(prob_idx, n_idx, est_idx)
-                        self.trials_retrieved_ += self.reps
+                c0, r0 = self.trials_computed_, self.trials_retrieved_
+                n_trials = n_sizes * n_estimators * self.reps
+                self._cached_data_key = None
+                self._cached_data = None
+                trials = ((n_idx, rep_idx, est_idx)
+                          for n_idx in range(n_sizes)
+                          for rep_idx in range(self.reps)
+                          for est_idx in range(n_estimators))
+                for n_idx, rep_idx, est_idx in tqdm(trials, total=n_trials,
+                                                     desc=dataset, position=1, leave=False):
+                    if (not force_recompute and not overwrite_cache and not ignore_cache
+                            and self._all_stats_in_trial_cache(
+                                prob_idx, n_idx, est_idx, rep_idx)):
+                        self._retrieve_trial(prob_idx, n_idx, est_idx, rep_idx)
+                        self.trials_retrieved_ += 1
                     else:
-                        self._run_series(prob_idx, n_idx, est_idx)
+                        if overwrite_cache and not ignore_cache:
+                            shutil.rmtree(
+                                self._trial_cache_dir(prob_idx, n_idx, est_idx, rep_idx),
+                                ignore_errors=True)
+                        self._run_trial(prob_idx, n_idx, est_idx, rep_idx)
                         if not ignore_cache:
-                            self._write_series(prob_idx, n_idx, est_idx)
-                        self.trials_computed_ += self.reps
-            if self.verbose:
-                print()
+                            self._write_trial(prob_idx, n_idx, est_idx, rep_idx)
+                        self.trials_computed_ += 1
+                elapsed = time.time() - t0
+                computed = self.trials_computed_ - c0
+                retrieved = self.trials_retrieved_ - r0
+                if self.verbose:
+                    _write(f'{dataset}  —  {computed} computed, {retrieved} retrieved'
+                           f'  ({elapsed:.1f}s)')
         self.timestamp_end_ = datetime.datetime.now().isoformat()
         if not ignore_cache:
-            save_json(run_path, to_json(self, include_computed=_RUN_FILE_STATE))
+            save_json(run_path, to_json(self, include_computed=RUN_FILE_STATE))
         return self
 
 
@@ -592,139 +556,5 @@ class RidgePathExperiment:
         lr = LinearRegression(fit_intercept=False)
         lr.fit(x_tr, y_tr)
         self.ols_coef_ = lr.coef_
-
-        return self
-
-
-class EmpiricalDataExperiment:
-    """Run repeated train/test experiments on a list of EmpiricalDataProblem instances.
-
-    Stores per-run results as numpy arrays of shape
-    ``(reps, n_problems, n_sizes, n_estimators)`` per metric, matching the
-    array layout of ``Experiment``. Failed runs (exception during fit) are
-    recorded as NaN and trigger a ``warnings.warn``.
-
-    Parameters
-    ----------
-    problems : list of EmpiricalDataProblem
-    estimators : list of estimator objects
-    reps : int
-    ns : array-like of shape (n_problems, n_sizes)
-        Provides n_sizes training sizes per problem for which to assess
-        estimator performance. A 1-D input is treated as a single row and
-        broadcast to all problems; to assign a single varying size per problem
-        pass a list of single-element lists ``[[n1], [n2], ...]`` or use
-        n_train_from_proportion().
-    seed : int or None
-    generator : {'PCG64', 'MT19937'}, default 'PCG64'
-        'MT19937' uses np.random.RandomState for legacy numerical equivalence.
-    seed_scope : {'series', 'trial', 'experiment'}, default 'series'
-        When the seed is reset: per-problem, per-rep, or once for the run.
-    seed_progression : {'fixed', 'sequential'}, default 'fixed'
-        'fixed' reuses seed; 'sequential' uses seed + unit_idx.
-    stats : list of metric callables or None
-    est_names : list of str or None
-    verbose : bool, default True
-
-    Examples
-    --------
-    >>> from fastridge import RidgeEM
-    >>> from problems import EmpiricalDataProblem, n_train_from_proportion
-    >>> prob = EmpiricalDataProblem('diabetes', 'target', zero_variance_filter=True)
-    >>> ns = n_train_from_proportion([prob])
-    >>> exp = EmpiricalDataExperiment(
-    ...     [prob], [RidgeEM()], reps=2, ns=ns,
-    ...     seed=1, generator='MT19937', verbose=False)
-    >>> exp.run().prediction_r2_.shape
-    (2, 1, 1, 1)
-    >>> exp.ns.shape
-    (1, 1)
-    >>> int(exp.ns[0, 0]) > 0
-    True
-    """
-
-    _rng_factories = {
-        'PCG64':   lambda seed: np.random.Generator(np.random.PCG64(seed)),
-        'MT19937': lambda seed: np.random.RandomState(seed),
-    }
-
-    def __init__(self, problems, estimators, reps, ns,
-                 seed=None,
-                 generator='PCG64',
-                 seed_scope='series',
-                 seed_progression='fixed',
-                 stats=None, est_names=None, verbose=True):
-        self.problems = problems
-        self.estimators = estimators
-        self.reps = reps
-        self.ns = np.atleast_2d(ns)
-        if len(self.ns) != len(self.problems):
-            self.ns = self.ns.repeat(len(self.problems), axis=0)
-        self.seed = seed
-        self.generator = generator
-        self.seed_scope = seed_scope
-        self.seed_progression = seed_progression
-        self._rng_factory = self._rng_factories[generator]
-        self.stats = empirical_default_stats if stats is None else stats
-        self.est_names = [str(e) for e in estimators] if est_names is None else est_names
-        self.verbose = verbose
-
-    def _seed_val(self, unit_idx):
-        if self.seed is None:
-            return None
-        return self.seed if self.seed_progression == 'fixed' else self.seed + unit_idx
-
-    def _make_rng(self, unit_idx):
-        return self._rng_factory(self._seed_val(unit_idx))
-
-    def run(self):
-        n_problems = len(self.problems)
-        n_estimators = len(self.estimators)
-        n_sizes = len(self.ns[0])
-
-        for stat in self.stats:
-            self.__dict__[str(stat) + '_'] = np.full(
-                (self.reps, n_problems, n_sizes, n_estimators), np.nan)
-
-        if self.seed_scope == 'experiment':
-            self.rng = self._make_rng(unit_idx=0)
-
-        for prob_idx, problem in enumerate(self.problems):
-            if self.verbose:
-                print(problem.dataset, end=' ')
-
-            for n_idx, n_train in enumerate(self.ns[prob_idx]):
-                if self.seed_scope == 'series':
-                    self.rng = self._make_rng(unit_idx=prob_idx)
-
-                for iter_idx in range(self.reps):
-                    if self.verbose:
-                        print('.', end='')
-
-                    if self.seed_scope == 'trial':
-                        self.rng = self._make_rng(unit_idx=iter_idx)
-
-                    X_train, X_test, y_train, y_test = problem.get_X_y(
-                        n_train, rng=self.rng)
-
-                    for est_idx, est in enumerate(self.estimators):
-                        _est = clone(est, safe=False)
-                        try:
-                            t0 = time.time()
-                            _est.fit(X_train, y_train)
-                            _est.fitting_time_ = time.time() - t0
-                        except Exception as e:
-                            warnings.warn(
-                                f"Run {iter_idx} failed for '{self.est_names[est_idx]}'"
-                                f" on '{problem.dataset}': {e}")
-                            continue
-
-                        for stat in self.stats:
-                            self.__dict__[str(stat) + '_'][
-                                iter_idx, prob_idx, n_idx, est_idx] = stat(
-                                    _est, problem, X_test, y_test)
-
-            if self.verbose:
-                print()
 
         return self

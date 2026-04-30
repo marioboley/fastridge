@@ -1,3 +1,4 @@
+import contextlib
 import json
 import os
 import tempfile
@@ -10,8 +11,36 @@ from typing import Any
 
 import numpy as np
 
+@contextlib.contextmanager
+def route_warnings_to(write_fn, propagate=True):
+    """Route warnings.warn output through write_fn for the duration of the block.
 
-def to_json(obj, include_computed=False, include_defaults=False):
+    Restores the original handler on exit, including on KeyboardInterrupt.
+    If propagate is True (default), warnings are also forwarded to whatever
+    handler was active before entry (e.g. pytest's capture handler or stderr).
+    Set propagate=False to suppress further propagation, e.g. when write_fn
+    already provides the desired display and stderr output would be redundant.
+
+    >>> import warnings
+    >>> received = []
+    >>> with route_warnings_to(received.append, propagate=False):
+    ...     warnings.warn('test', UserWarning)
+    >>> received[0]
+    'UserWarning: test'
+    """
+    orig = warnings.showwarning
+    def _show(msg, cat, fn, ln, file=None, line=None):
+        write_fn(f'{cat.__name__}: {msg}')
+        if propagate:
+            orig(msg, cat, fn, ln, file=file, line=line)
+    warnings.showwarning = _show
+    try:
+        yield
+    finally:
+        warnings.showwarning = orig
+
+
+def to_json(obj, include_computed: bool | list[str]=False, include_defaults=False):
     """Serialise obj to a JSON-native Python object.
 
     include_computed controls which trailing-underscore attributes are appended

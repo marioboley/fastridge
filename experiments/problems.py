@@ -1,14 +1,15 @@
 """
 Problem classes for simulated and empirical data experiments.
 """
-import dataclasses
 import warnings
 from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
 from scipy.stats import wishart, multivariate_normal, uniform
-from sklearn.preprocessing import OneHotEncoder, PolynomialFeatures
+from itertools import combinations_with_replacement
+
+from sklearn.preprocessing import OneHotEncoder
 
 from data import get_dataset, DATASETS
 
@@ -25,8 +26,10 @@ class EmpiricalDataProblem:
     ----------
     dataset : str
         Name of the dataset as registered in data.DATASETS.
-    target : str
-        Name of the target column.
+    target : str or tuple of str
+        Name of the target column, or a tuple of column names for multi-target
+        prediction. When a tuple is supplied, all named columns are excluded
+        from X and get_X_y returns a DataFrame for y.
     drop : tuple of str, optional
         Column names to drop before returning X. Columns absent from the
         dataset are skipped with a warning.
@@ -105,6 +108,13 @@ class EmpiricalDataProblem:
     >>> list(Xte_f.columns) == list(Xtr_f.columns)
     True
 
+    Multi-target usage — y is a DataFrame when target is a tuple:
+
+    >>> student_mt = EmpiricalDataProblem('student', ('G1', 'G2', 'G3'))
+    >>> _, _, y_tr, _ = student_mt.get_X_y(454)
+    >>> y_tr.shape
+    (454, 3)
+
     Value-object identity (eq and hash):
 
     >>> p1 = EmpiricalDataProblem('diabetes', 'target')
@@ -124,7 +134,7 @@ class EmpiricalDataProblem:
     ('bmi',)
     """
     dataset: str
-    target: str
+    target: str | tuple
     drop: tuple = ()
     nan_policy: str = None
     x_transforms: tuple = ()
@@ -139,14 +149,15 @@ class EmpiricalDataProblem:
         if missing:
             warnings.warn(f"Columns not found in '{self.dataset}', skipping drop: {missing}")
         df = df.drop(columns=[c for c in self.drop if c in df.columns])
-        df = df.dropna(subset=[self.target])
+        target_cols = [self.target] if isinstance(self.target, str) else list(self.target)
+        df = df.dropna(subset=target_cols)
         if self.nan_policy == 'drop_rows':
             df = df.dropna()
         elif self.nan_policy == 'drop_cols':
             df = df.dropna(axis=1)
         df = df.reset_index(drop=True)
-        X = df.drop(columns=[self.target])
-        y = df[self.target]
+        X = df.drop(columns=target_cols)
+        y = df[self.target] if isinstance(self.target, str) else df[target_cols]
         for fn in self.y_transforms:
             y = fn(y)
         for fn in self.x_transforms:
@@ -194,7 +205,7 @@ class PolynomialExpansion:
     Parameters
     ----------
     degree : int
-        Polynomial degree passed to PolynomialFeatures.
+        Polynomial degree.
     max_entries : int, optional
         Maximum total entries (n * p_expanded) before interaction columns are
         subsampled; linear columns are always kept. Default 50_000_000.
@@ -228,22 +239,56 @@ class PolynomialExpansion:
     degree: int
     max_entries: int = 50_000_000
 
+    @staticmethod
+    def _feature_name(col_names, combo):
+        """Return sklearn-compatible name for a polynomial combination.
+
+        combo is a tuple of column indices with repetition, sorted ascending.
+        Example: (0, 0, 1) with col_names ['a', 'b'] gives 'a^2 b'.
+
+        >>> PolynomialExpansion._feature_name(['a', 'b', 'c'], (0, 0, 1))
+        'a^2 b'
+        >>> PolynomialExpansion._feature_name(['a', 'b'], (1, 1, 1))
+        'b^3'
+        """
+        counts = {}
+        for idx in combo:
+            counts[idx] = counts.get(idx, 0) + 1
+        return ' '.join(
+            f'{col_names[idx]}^{exp}' if exp > 1 else col_names[idx]
+            for idx, exp in sorted(counts.items())
+        )
+
     def __call__(self, X, rng):
-        poly = PolynomialFeatures(degree=self.degree, include_bias=False)
-        X_poly = pd.DataFrame(
-            poly.fit_transform(X),
-            columns=poly.get_feature_names_out(X.columns),
+        X_arr = np.asarray(X, dtype=float)
+        n, p = X_arr.shape
+        col_names = list(X.columns)
+        all_combos = [
+            combo
+            for d in range(2, self.degree + 1)
+            for combo in combinations_with_replacement(range(p), d)
+        ]
+        if n * (p + len(all_combos)) > self.max_entries:
+            p_budget = int(np.ceil(self.max_entries / n))
+            pnew = max(0, min(len(all_combos), p_budget - p))
+            sampled = sorted(rng.choice(len(all_combos), size=pnew, replace=False))
+            selected_combos = [all_combos[i] for i in sampled]
+        else:
+            selected_combos = all_combos
+        higher_degree_cols = []
+        higher_degree_names = []
+        for combo in selected_combos:
+            col = np.ones(n)
+            for idx in combo:
+                col *= X_arr[:, idx]
+            higher_degree_cols.append(col)
+            higher_degree_names.append(self._feature_name(col_names, combo))
+        all_cols = [X_arr[:, i] for i in range(p)] + higher_degree_cols
+        return pd.DataFrame(
+            np.column_stack(all_cols),
+            columns=col_names + higher_degree_names,
             index=X.index
         )
-        n, p = X_poly.shape
-        if n * p > self.max_entries:
-            linear_cols = list(X.columns)
-            interaction_cols = [c for c in X_poly.columns if c not in linear_cols]
-            p_budget = int(np.ceil(self.max_entries / n))
-            pnew = max(0, min(len(interaction_cols), p_budget - len(linear_cols)))
-            sampled = sorted(rng.choice(len(interaction_cols), size=pnew, replace=False))
-            return X_poly[linear_cols + [interaction_cols[i] for i in sampled]]
-        return X_poly
 
 
 @dataclass(frozen=True)
@@ -367,121 +412,4 @@ def random_problem(p, r=None, sigma_beta=1.0, sigma_eps=0.5, rng=None):
     return linear_problem(beta, sigma_eps, x_dist)
 
 
-_OHE = (OneHotEncodeCategories(),)
-
-NEURIPS2023 = frozenset({
-    EmpiricalDataProblem('abalone',          'Rings',
-                         x_transforms=_OHE, zero_variance_filter=True),
-    EmpiricalDataProblem('airfoil',          'scaled-sound-pressure',
-                         zero_variance_filter=True),
-    EmpiricalDataProblem('automobile',       'price',
-                         nan_policy='drop_rows',
-                         x_transforms=_OHE,
-                         y_transforms=(np.log,),
-                         zero_variance_filter=True),
-    EmpiricalDataProblem('autompg',          'mpg',
-                         drop=('car_name',), nan_policy='drop_rows',
-                         zero_variance_filter=True),
-    EmpiricalDataProblem('blog',             'V281',
-                         zero_variance_filter=True),
-    EmpiricalDataProblem('boston',           'medv',
-                         zero_variance_filter=True),
-    EmpiricalDataProblem('concrete',         'Concrete compressive strength',
-                         zero_variance_filter=True),
-    EmpiricalDataProblem('crime',            'ViolentCrimesPerPop',
-                         drop=('state', 'fold', 'communityname'),
-                         nan_policy='drop_cols',
-                         zero_variance_filter=True),
-    EmpiricalDataProblem('ct_slices',        'reference',
-                         zero_variance_filter=True),
-    EmpiricalDataProblem('diabetes',         'target',
-                         zero_variance_filter=True),
-    EmpiricalDataProblem('eye',              'y',
-                         zero_variance_filter=True),
-    EmpiricalDataProblem('facebook',         'Total Interactions',
-                         drop=('comment', 'like', 'share'),
-                         nan_policy='drop_rows',
-                         x_transforms=_OHE,
-                         zero_variance_filter=True),
-    EmpiricalDataProblem('forest',           'area',
-                         x_transforms=_OHE,
-                         y_transforms=(np.log1p,),
-                         zero_variance_filter=True),
-    EmpiricalDataProblem('naval_propulsion', 'GT_compressor_decay',
-                         drop=('GT_turbine_decay',),
-                         zero_variance_filter=True),
-    EmpiricalDataProblem('naval_propulsion', 'GT_turbine_decay',
-                         drop=('GT_compressor_decay',),
-                         zero_variance_filter=True),
-    EmpiricalDataProblem('parkinsons',       'motor_UPDRS',
-                         drop=('total_UPDRS',),
-                         zero_variance_filter=True),
-    EmpiricalDataProblem('parkinsons',       'total_UPDRS',
-                         drop=('motor_UPDRS',),
-                         zero_variance_filter=True),
-    EmpiricalDataProblem('real_estate',      'Y house price of unit area',
-                         zero_variance_filter=True),
-    EmpiricalDataProblem('ribo',             'y',
-                         zero_variance_filter=True),
-    EmpiricalDataProblem('student',          'G3',
-                         drop=('G1', 'G2'),
-                         x_transforms=_OHE,
-                         zero_variance_filter=True),
-    EmpiricalDataProblem('tomshw',           'V97',
-                         zero_variance_filter=True),
-    EmpiricalDataProblem('twitter',          'V78',
-                         zero_variance_filter=True),
-    EmpiricalDataProblem('yacht',            'Residuary_resistance',
-                         y_transforms=(np.log,),
-                         zero_variance_filter=True),
-})
-
-
-NEURIPS2023_D2 = frozenset(
-    dataclasses.replace(p, x_transforms=p.x_transforms + (PolynomialExpansion(2),))
-    for p in NEURIPS2023
-    if 'p' in DATASETS[p.dataset]
-    and DATASETS[p.dataset]['p'] < 1000
-)
-
-NEURIPS2023_D3 = frozenset(
-    dataclasses.replace(p, x_transforms=p.x_transforms + (PolynomialExpansion(3),))
-    for p in NEURIPS2023
-    if 'p' in DATASETS[p.dataset]
-    and 'n' in DATASETS[p.dataset]
-    and DATASETS[p.dataset]['p'] < 150
-    and DATASETS[p.dataset]['n'] < 20000
-)
-
-# Training set sizes (n_train = floor(0.7 * n_actual)) derived from actual
-# post-preprocessing row counts. Keyed by dataset name and shared across
-# NEURIPS2023, NEURIPS2023_D2, and NEURIPS2023_D3 (polynomial expansion does
-# not change row count; no dataset in these sets has differing n across targets).
-#
-# Deviations from floor(0.7 * DATASETS[dataset]['n']):
-#   automobile: actual n=159 after drop_rows (registry n=205) -> n_train=111 vs 143
-#   autompg:    actual n=392 after drop_rows (registry n=398) -> n_train=274 vs 278
-#   facebook:   actual n=499 after drop_rows (registry n=500) -> n_train=349 vs 350
-NEURIPS2023_TRAIN_SIZES = {
-    'abalone':          2923,
-    'airfoil':          1052,
-    'automobile':        111,
-    'autompg':           274,
-    'blog':            36677,
-    'boston':            354,
-    'concrete':          721,
-    'crime':            1395,
-    'ct_slices':       37450,
-    'diabetes':          309,
-    'eye':                84,
-    'facebook':          349,
-    'forest':            361,
-    'naval_propulsion': 8353,
-    'parkinsons':       4112,
-    'real_estate':       289,
-    'ribo':               49,
-    'student':           454,
-    'tomshw':          19725,
-    'twitter':        408275,
-    'yacht':             215,
-}
+onehot_non_numeric = (OneHotEncodeCategories(),)

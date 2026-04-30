@@ -64,6 +64,8 @@ Both classes follow the scikit-learn estimator API (`fit(X, y)` / `predict(X)`) 
 
 **Notebook code style:** Aim for compact, declarative cells. A cell should express *what* is being computed or displayed, not walk through *how* step by step. Prefer list comprehensions and expressive function calls over explicit loops and intermediate variables. Heavy logic belongs in module functions, not inline in cells.
 
+**Single source of truth:** Every named constant, configuration value, or shared artefact must have exactly one definition that all consumers import. A value that is defined in two places (module and notebook, two modules, module and test) will silently diverge. If the only current consumer is a notebook or a script, the definition still belongs in whichever module owns that concept — consumers import, they do not redefine.
+
 ## Coding Conventions
 
 **Class names:** UpperCamelCase / PascalCase (Python standard — each word capitalised, no separators). `linear_problem` in `experiments/problems.py` is a legacy exception — do not replicate it; new classes use PascalCase.
@@ -81,6 +83,8 @@ Both classes follow the scikit-learn estimator API (`fit(X, y)` / `predict(X)`) 
 **Imports:** Default to top-level imports. Inline imports (`from x import y` inside a function) are acceptable only for optional external dependencies that may not be installed in all environments (e.g. `ucimlrepo` is not a package dependency). When using an inline import, add a module-level comment documenting the optional dependency so it is visible without reading function bodies. Raise the question with the user if a new case arises — the rule may evolve.
 
 **Helper functions:** At module level, prefer documented public helpers with a general contract over private helpers with an overly specific one — specificity shows in a function's contract as much as its name. A module-level helper that is genuinely reusable needs a docstring and doctest and needs to be placed in the proper module (often general utility module); a leading underscore is not a substitute for thinking about where a function belongs. Private methods within a class are fine when they exist to improve readability of public methods and cannot be adequalely expressed as general purpose helper.
+
+**Code entropy:** Never silently introduce duplication or complexity. When the clean solution requires more thought or refactoring, raise it rather than taking the shortcut. Duplication and complexity are sometimes accepted after explicit discussion — but that is a conscious decision, not a default. Watch especially for: leaving a copy of extracted logic in the caller for "legacy" or "edge case" variants; adding a parallel implementation because integration is harder; growing a function's scope to avoid touching a second file; and adding alternative code paths (e.g. a `verbose` branch). Every additional branch is a maintenance surface — raise it as a design question rather than writing it silently.
 
 ## Production Capacity
 

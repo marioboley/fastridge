@@ -6,50 +6,26 @@ import experiments
 from fastridge import RidgeEM
 from problems import EmpiricalDataProblem, n_train_from_proportion
 from neurips2023 import SyntheticDataExperiment
-from experiments import (EmpiricalDataExperiment, Experiment, ExperimentWithPerSeriesSeeding, Metric,
+import neurips2023
+from experiments import (Experiment, Metric,
                          parameter_mean_squared_error, prediction_mean_squared_error,
                          regularization_parameter, number_of_iterations, variance_abs_error,
                          fitting_time, prediction_r2, number_of_features)
+from neurips2023 import ExperimentWithPerSeriesSeeding
 
 
-def _simple_exp(**kwargs):
-    prob = EmpiricalDataProblem('diabetes', 'target', zero_variance_filter=True)
-    ns = n_train_from_proportion([prob])
-    defaults = dict(seed=1, generator='MT19937', verbose=False)
-    defaults.update(kwargs)
-    return EmpiricalDataExperiment([prob], [RidgeEM()], reps=2, ns=ns, **defaults)
-
-
-def test_result_shape():
-    assert _simple_exp().run().prediction_r2_.shape == (2, 1, 1, 1)
+@pytest.fixture
+def cache_dir(tmp_path):
+    """tmp_path with the runs/ subdirectory pre-created, as in a real checkout."""
+    os.makedirs(tmp_path / 'runs')
+    return tmp_path
 
 
 def test_ns_shape():
-    exp = _simple_exp()
+    prob = EmpiricalDataProblem('diabetes', 'target', zero_variance_filter=True)
+    exp = Experiment([prob], [RidgeEM()], reps=2, ns=n_train_from_proportion([prob]))
     assert exp.ns.shape == (1, 1)
-    assert int(exp.ns[0, 0]) == 309  # 442 * 0.7
-
-
-def test_make_rng_fixed_progression_same_seed():
-    exp = _simple_exp(seed_progression='fixed')
-    r0 = exp._make_rng(unit_idx=0)
-    r5 = exp._make_rng(unit_idx=5)
-    assert r0.randint(10000) == r5.randint(10000)
-
-
-def test_make_rng_sequential_progression_different_seeds():
-    exp = _simple_exp(seed_progression='sequential')
-    r0 = exp._make_rng(unit_idx=0)
-    r1 = exp._make_rng(unit_idx=1)
-    assert r0.randint(10000) != r1.randint(10000)
-
-
-def test_series_scope_reproducible():
-    exp1 = _simple_exp()
-    exp2 = _simple_exp()
-    exp1.run()
-    exp2.run()
-    np.testing.assert_array_equal(exp1.prediction_r2_, exp2.prediction_r2_)
+    assert int(exp.ns[0, 0]) == 309
 
 
 def test_stat_instances_are_metric():
@@ -85,7 +61,7 @@ def test_warn_retrieval_returns_str_on_meaningful_variation():
 
 
 from util import save_json, load_json
-from experiments import _make_run_id
+from experiments import make_run_id
 
 
 
@@ -104,8 +80,8 @@ def test_save_load_metric_file_roundtrip(tmp_path):
     assert load_json(path) == original
 
 
-def test_make_run_id_format():
-    run_id = _make_run_id('Experiment')
+def testmake_run_id_format():
+    run_id = make_run_id('Experiment')
     assert run_id.startswith('Experiment__')
     tail = run_id[len('Experiment__'):]
     parts = tail.split('-')
@@ -140,12 +116,6 @@ def test_fitting_time_warn_retrieval_wide_ci():
     assert fitting_time.warn_retrieval(comps) is not None
 
 
-def test_pcg64_and_mt19937_differ():
-    exp_mt = _simple_exp(generator='MT19937').run()
-    exp_pc = _simple_exp(generator='PCG64').run()
-    assert not np.array_equal(exp_mt.prediction_r2_, exp_pc.prediction_r2_)
-
-
 def test_synthetic_experiment_importable():
     assert SyntheticDataExperiment is not None
 
@@ -174,10 +144,10 @@ def test_new_experiment_trial_cache_hit(tmp_path, monkeypatch):
     np.testing.assert_array_equal(exp1.prediction_r2_, exp2.prediction_r2_)
 
 
-def test_new_experiment_ignore_cache(tmp_path, monkeypatch):
-    monkeypatch.setattr(experiments, 'CACHE_DIR', str(tmp_path))
+def test_new_experiment_ignore_cache(cache_dir, monkeypatch):
+    monkeypatch.setattr(experiments, 'CACHE_DIR', str(cache_dir))
     _simple_new_exp().run(ignore_cache=True)
-    assert not os.path.exists(os.path.join(str(tmp_path), 'trial'))
+    assert not os.path.exists(os.path.join(str(cache_dir), 'trial'))
 
 
 def test_new_experiment_force_recompute(tmp_path, monkeypatch):
@@ -198,14 +168,16 @@ def test_new_experiment_force_recompute(tmp_path, monkeypatch):
 def test_new_experiment_run_file_written(tmp_path, monkeypatch):
     monkeypatch.setattr(experiments, 'CACHE_DIR', str(tmp_path))
     _simple_new_exp().run()
-    assert len(os.listdir(os.path.join(str(tmp_path), 'runs'))) == 1
+    runs_dir = os.path.join(str(tmp_path), 'runs')
+    json_files = [f for f in os.listdir(runs_dir) if f.endswith('.json')]
+    assert len(json_files) == 1
 
 
 def test_new_experiment_run_file_content(tmp_path, monkeypatch):
     monkeypatch.setattr(experiments, 'CACHE_DIR', str(tmp_path))
     _simple_new_exp().run()
     runs_dir = os.path.join(str(tmp_path), 'runs')
-    filenames = os.listdir(runs_dir)
+    filenames = [f for f in os.listdir(runs_dir) if f.endswith('.json')]
     assert len(filenames) == 1
     assert filenames[0].startswith('Experiment__')
     with open(os.path.join(runs_dir, filenames[0])) as f:
@@ -219,44 +191,41 @@ def test_new_experiment_run_file_content(tmp_path, monkeypatch):
     assert data['reps'] == 2
 
 
-def _simple_series_exp(**kwargs):
-    prob = EmpiricalDataProblem('diabetes', 'target', zero_variance_filter=True)
-    ns = n_train_from_proportion([prob])
-    defaults = dict(seed=1, verbose=False)
-    defaults.update(kwargs)
-    return ExperimentWithPerSeriesSeeding([prob], [RidgeEM()], reps=2, ns=ns, **defaults)
 
-
-def test_series_exp_result_shape():
-    assert _simple_series_exp().run(ignore_cache=True).prediction_r2_.shape == (2, 1, 1, 1)
-
-
-def test_series_exp_cache_hit(tmp_path, monkeypatch):
+def test_new_experiment_overwrite_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(experiments, 'CACHE_DIR', str(tmp_path))
-    exp1 = _simple_series_exp().run()
+    _simple_new_exp().run()
     with pytest.warns(UserWarning, match='FittingTime'):
-        exp2 = _simple_series_exp().run()
-    np.testing.assert_array_equal(exp1.prediction_r2_, exp2.prediction_r2_)
+        _simple_new_exp().run(force_recompute=True)  # accumulates 2 computations
+    _simple_new_exp().run(overwrite_cache=True)  # deletes per combo, rewrites: back to 1
+    trial_dir = os.path.join(str(tmp_path), 'trial')
+    json_files = [os.path.join(r, f)
+                  for r, _, fs in os.walk(trial_dir)
+                  for f in fs if f.endswith('.json')]
+    with open(json_files[0]) as f:
+        data = json.load(f)
+    assert len(data['computations']) == 1
 
 
-def test_series_exp_ignore_cache(tmp_path, monkeypatch):
+def test_new_experiment_log_file_written(tmp_path, monkeypatch):
     monkeypatch.setattr(experiments, 'CACHE_DIR', str(tmp_path))
-    _simple_series_exp().run(ignore_cache=True)
-    assert not os.path.exists(os.path.join(str(tmp_path), 'series'))
+    _simple_new_exp().run()
+    runs_dir = os.path.join(str(tmp_path), 'runs')
+    log_files = [f for f in os.listdir(runs_dir) if f.endswith('.log')]
+    assert len(log_files) == 1
 
 
-def test_series_exp_numerical_equivalence():
-    # ExperimentWithPerSeriesSeeding must reproduce EmpiricalDataExperiment
-    # with generator='MT19937', seed_scope='series', seed_progression='fixed' exactly.
+def test_new_experiment_get_x_y_called_once_per_rep(monkeypatch):
     prob = EmpiricalDataProblem('diabetes', 'target', zero_variance_filter=True)
     ns = n_train_from_proportion([prob])
-    legacy = EmpiricalDataExperiment(
-        [prob], [RidgeEM()], reps=2, ns=ns,
-        seed=1, generator='MT19937', seed_scope='series',
-        seed_progression='fixed', verbose=False)
-    new = ExperimentWithPerSeriesSeeding(
-        [prob], [RidgeEM()], reps=2, ns=ns,
-        seed=1, verbose=False)
-    legacy.run()
-    new.run(ignore_cache=True)
-    np.testing.assert_array_equal(legacy.prediction_r2_, new.prediction_r2_)
+    call_count = {'n': 0}
+    original = EmpiricalDataProblem.get_X_y
+    def counting_get_X_y(self, *args, **kwargs):
+        call_count['n'] += 1
+        return original(self, *args, **kwargs)
+    monkeypatch.setattr(EmpiricalDataProblem, 'get_X_y', counting_get_X_y)
+    exp = Experiment([prob], [RidgeEM(), RidgeEM()], reps=3, ns=ns,
+                     seed=1, verbose=False)
+    exp.run(ignore_cache=True)
+    # 1 n_size * 3 reps — shared across both estimators
+    assert call_count['n'] == 3
